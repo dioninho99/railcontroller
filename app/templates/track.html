@@ -1,0 +1,353 @@
+{% extends "base.html" %}
+{% block title %}– Gleisplan{% endblock %}
+{% block nav_track %}active{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Gleisplan</h1>
+  <div class="track-toolbar">
+    <span class="toolbar-label">Element:</span>
+    <button class="tool-btn active" data-type="straight" onclick="selectTool('straight', this)" title="Gerades Gleis">━</button>
+    <button class="tool-btn" data-type="curve" onclick="selectTool('curve', this)" title="Kurve">╭</button>
+    <button class="tool-btn" data-type="turnout" onclick="selectTool('turnout', this)" title="Weiche">⑂</button>
+    <button class="tool-btn" data-type="signal" onclick="selectTool('signal', this)" title="Signal">🚦</button>
+    <button class="tool-btn" data-type="block" onclick="selectTool('block', this)" title="Block">▭</button>
+    <button class="tool-btn" data-type="label" onclick="selectTool('label', this)" title="Beschriftung">T</button>
+    <span class="toolbar-sep"></span>
+    <button class="tool-btn" onclick="rotateSelected()" title="Drehen (R)">↻</button>
+    <button class="tool-btn" onclick="deleteSelected()" title="Löschen (Del)">🗑</button>
+    <span class="toolbar-sep"></span>
+    <button class="btn btn-sm btn-ghost" onclick="clearTrack()">Leeren</button>
+  </div>
+</div>
+
+<div class="track-workspace">
+  <div class="track-canvas-wrap">
+    <svg id="track-canvas" width="100%" viewBox="0 0 2000 1200"
+         onclick="onCanvasClick(event)"
+         oncontextmenu="onCanvasRightClick(event)">
+      <defs>
+        <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+          <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#c4b8f0" stroke-width="0.5"/>
+        </pattern>
+      </defs>
+      <rect width="2000" height="1200" fill="#f8f6ff"/>
+      <rect width="2000" height="1200" fill="url(#grid)"/>
+      <g id="track-elements"></g>
+    </svg>
+  </div>
+
+  <!-- Eigenschaften-Panel -->
+  <div class="track-props">
+    <div class="props-header">Eigenschaften</div>
+    <div id="props-content">
+      <p class="muted" style="padding:.75rem">Element anklicken zum Bearbeiten.</p>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const GRID = 40;
+let currentTool = 'straight';
+let selectedId = null;
+let elements = [];
+let turnoutStates = {};
+
+// ── Laden ─────────────────────────────────────
+
+async function loadTrack() {
+  elements = await fetch('/api/track/').then(r => r.json());
+  const turnouts = await fetch('/api/turnouts/').then(r => r.json());
+  turnouts.forEach(t => { turnoutStates[t.address] = t.thrown; });
+  renderAll();
+}
+
+// ── Rendern ───────────────────────────────────
+
+function renderAll() {
+  const g = document.getElementById('track-elements');
+  g.innerHTML = '';
+  elements.forEach(el => g.appendChild(makeElement(el)));
+}
+
+function makeElement(el) {
+  const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+  g.setAttribute('transform', `translate(${el.x + GRID/2}, ${el.y + GRID/2}) rotate(${el.rotation})`);
+  g.setAttribute('data-id', el.id);
+  g.setAttribute('cursor', 'pointer');
+
+  if (selectedId === el.id) {
+    // Auswahl-Highlight
+    const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    bg.setAttribute('x', -GRID/2 - 4); bg.setAttribute('y', -GRID/2 - 4);
+    bg.setAttribute('width', GRID + 8); bg.setAttribute('height', GRID + 8);
+    bg.setAttribute('rx', '6');
+    bg.setAttribute('fill', '#7c3aed'); bg.setAttribute('fill-opacity', '0.15');
+    bg.setAttribute('stroke', '#7c3aed'); bg.setAttribute('stroke-width', '1.5');
+    bg.setAttribute('stroke-dasharray', '4 2');
+    g.appendChild(bg);
+  }
+
+  g.innerHTML += getElementSVG(el);
+  g.addEventListener('click', (e) => { e.stopPropagation(); selectElement(el.id); });
+  return g;
+}
+
+function getElementSVG(el) {
+  const t = el.element_type;
+  const hs = GRID / 2;
+
+  if (t === 'straight') {
+    return `
+      <rect x="${-hs}" y="-8" width="${GRID}" height="16" rx="3" fill="#e8e0fc" fill-opacity="0.6"/>
+      <line x1="${-hs+2}" y1="0" x2="${hs-2}" y2="0" stroke="#3b1fa8" stroke-width="5" stroke-linecap="round"/>
+      <line x1="${-hs+2}" y1="0" x2="${hs-2}" y2="0" stroke="#c4b0fa" stroke-width="2" stroke-linecap="round"/>`;
+  }
+  if (t === 'curve') {
+    return `
+      <rect x="${-hs}" y="${-hs}" width="${GRID}" height="${GRID}" rx="3" fill="#e8e0fc" fill-opacity="0.4"/>
+      <path d="M ${-hs+2} 0 Q 0 0 0 ${-hs+2}" fill="none" stroke="#3b1fa8" stroke-width="5" stroke-linecap="round"/>
+      <path d="M ${-hs+2} 0 Q 0 0 0 ${-hs+2}" fill="none" stroke="#c4b0fa" stroke-width="2" stroke-linecap="round"/>`;
+  }
+  if (t === 'turnout') {
+    const thrown = turnoutStates[el.ref_address] || false;
+    const straightColor = thrown ? '#888' : '#d97706';
+    const thrownColor   = thrown ? '#d97706' : '#888';
+    const addr = el.ref_address
+      ? `<rect x="-11" y="${hs-18}" width="22" height="14" rx="3" fill="#1e1b2e" fill-opacity="0.7"/>
+         <text x="0" y="${hs-8}" text-anchor="middle" font-size="9" font-weight="700" fill="#fbbf24">${el.ref_address}</text>`
+      : `<rect x="-14" y="${hs-18}" width="28" height="14" rx="3" fill="#ef4444" fill-opacity="0.8"/>
+         <text x="0" y="${hs-8}" text-anchor="middle" font-size="8" font-weight="700" fill="#fff">kein Adr.</text>`;
+    return `
+      <rect x="${-hs}" y="${-hs}" width="${GRID}" height="${GRID}" rx="3" fill="#fef9c3" fill-opacity="0.5"/>
+      <line x1="${-hs+2}" y1="0" x2="${hs-2}" y2="0" stroke="${straightColor}" stroke-width="5" stroke-linecap="round"/>
+      <line x1="${-hs+2}" y1="0" x2="4" y2="${-hs+4}" stroke="${thrownColor}" stroke-width="4" stroke-linecap="round"/>
+      ${addr}`;
+  }
+  if (t === 'signal') {
+    return `
+      <rect x="-12" y="-12" width="24" height="24" rx="4" fill="#1a1a2e" stroke="#7c3aed" stroke-width="1.5"/>
+      <circle cx="0" cy="-3" r="4" fill="#22c55e"/>
+      <circle cx="0" cy="5" r="4" fill="#374151"/>
+      <line x1="0" y1="12" x2="0" y2="${hs-2}" stroke="#555" stroke-width="2"/>
+      ${el.ref_address ? `<text x="0" y="${hs+10}" text-anchor="middle" font-size="9" font-weight="700" fill="#7c3aed">${el.ref_address}</text>` : ''}`;
+  }
+  if (t === 'block') {
+    const lbl = el.label || 'Block';
+    return `
+      <rect x="${-hs+2}" y="-10" width="${GRID-4}" height="20" fill="#ede9fe" stroke="#7c3aed" stroke-width="2" rx="4"/>
+      <text x="0" y="5" text-anchor="middle" font-size="10" font-weight="700" fill="#4c1d95">${lbl}</text>`;
+  }
+  if (t === 'label') {
+    return `
+      <rect x="${-(el.label||'Text').length * 4}" y="-11" width="${(el.label||'Text').length * 8 + 8}" height="16" rx="3" fill="#fff" fill-opacity="0.8"/>
+      <text x="0" y="4" text-anchor="middle" font-size="13" font-weight="600" fill="#1e1b2e">${el.label || 'Text'}</text>`;
+  }
+  return `<rect x="${-hs}" y="${-hs}" width="${GRID}" height="${GRID}" fill="#e5e7eb" stroke="#9ca3af" stroke-width="1" rx="4"/>
+          <text x="0" y="4" text-anchor="middle" font-size="9" fill="#374151">${t}</text>`;
+}
+
+// ── Canvas Klick ──────────────────────────────
+
+function onCanvasClick(e) {
+  if (e.target.closest('[data-id]')) return;
+  selectElement(null);
+  const svg = document.getElementById('track-canvas');
+  const pt = svg.createSVGPoint();
+  pt.x = e.clientX; pt.y = e.clientY;
+  const svgPt = pt.matrixTransform(svg.getScreenCTM().inverse());
+  const x = Math.floor(svgPt.x / GRID) * GRID;
+  const y = Math.floor(svgPt.y / GRID) * GRID;
+  placeElement(currentTool, x, y);
+}
+
+function onCanvasRightClick(e) {
+  e.preventDefault();
+  rotateSelected();
+}
+
+async function placeElement(type, x, y) {
+  const label = type === 'label' ? (prompt('Beschriftung:', '') || 'Text') : '';
+  let ref_address = null;
+  if (type === 'turnout' || type === 'signal') {
+    const inp = prompt(`DCC-Adresse für ${type === 'turnout' ? 'Weiche' : 'Signal'} (1–2044):`, '1');
+    ref_address = inp ? parseInt(inp) || null : null;
+  }
+  const res = await fetch('/api/track/', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({element_type: type, x, y, rotation: 0, ref_address, label})
+  });
+  const el = await res.json();
+  elements.push(el);
+  renderAll();
+  selectElement(el.id);
+}
+
+// ── Selektion & Properties ────────────────────
+
+function selectElement(id) {
+  selectedId = id;
+  renderAll();
+  showProps(id);
+}
+
+function showProps(id) {
+  const el = elements.find(e => e.id === id);
+  const panel = document.getElementById('props-content');
+  if (!el) {
+    panel.innerHTML = '<p class="muted" style="padding:.75rem">Element anklicken zum Bearbeiten.</p>';
+    return;
+  }
+
+  const typeLabels = {straight:'Gerades Gleis', curve:'Kurve', turnout:'Weiche', signal:'Signal', block:'Block', label:'Beschriftung'};
+
+  panel.innerHTML = `
+    <div class="prop-section">
+      <div class="prop-type-badge">${typeLabels[el.element_type] || el.element_type}</div>
+
+      <div class="prop-row">
+        <span class="prop-label">Rotation</span>
+        <div style="display:flex;gap:.4rem;flex-wrap:wrap">
+          ${[0,45,90,135,180,225,270,315].map(r =>
+            `<button class="rot-btn ${el.rotation===r?'rot-active':''}" onclick="setRotation(${el.id},${r})">${r}°</button>`
+          ).join('')}
+        </div>
+      </div>
+
+      ${el.element_type === 'turnout' || el.element_type === 'signal' ? `
+      <div class="prop-row">
+        <span class="prop-label">DCC-Adresse</span>
+        <div style="display:flex;gap:.4rem;align-items:center">
+          <input type="number" id="prop-addr-${el.id}" value="${el.ref_address || ''}"
+                 min="1" max="2044" placeholder="1–2044"
+                 style="width:90px">
+          <button class="btn btn-sm btn-primary" onclick="saveAddr(${el.id})">Speichern</button>
+        </div>
+      </div>` : ''}
+
+      ${el.element_type === 'block' || el.element_type === 'label' ? `
+      <div class="prop-row">
+        <span class="prop-label">Beschriftung</span>
+        <div style="display:flex;gap:.4rem;align-items:center">
+          <input type="text" id="prop-label-${el.id}" value="${el.label || ''}" placeholder="Text">
+          <button class="btn btn-sm btn-primary" onclick="saveLabel(${el.id})">OK</button>
+        </div>
+      </div>` : ''}
+
+      <div class="prop-actions">
+        <button class="btn btn-sm btn-ghost" onclick="rotateSelected()">↻ Drehen</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteSelected()">Löschen</button>
+      </div>
+    </div>
+
+    ${el.element_type === 'turnout' && el.ref_address ? `
+    <div class="prop-section" style="border-top:1px solid var(--border)">
+      <div class="prop-label" style="margin-bottom:.6rem">Weiche ${el.ref_address} stellen</div>
+      <div style="display:flex;gap:.5rem">
+        <button class="btn btn-success" style="flex:1" onclick="controlTurnout(${el.ref_address},false)">━ Gerade</button>
+        <button class="btn btn-warning" style="flex:1" onclick="controlTurnout(${el.ref_address},true)">⑂ Abbiegen</button>
+      </div>
+      <div class="prop-turnout-state" id="turnout-state-${el.ref_address}">
+        Status: <strong>${turnoutStates[el.ref_address] ? 'Abbiegen' : 'Gerade'}</strong>
+      </div>
+    </div>` : ''}
+  `;
+}
+
+async function setRotation(id, rotation) {
+  const el = elements.find(e => e.id === id);
+  if (!el) return;
+  el.rotation = rotation;
+  await fetch(`/api/track/${id}`, {
+    method: 'PUT', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({rotation})
+  });
+  renderAll(); showProps(id);
+}
+
+async function saveAddr(id) {
+  const inp = document.getElementById(`prop-addr-${id}`);
+  const value = parseInt(inp.value) || null;
+  await updateProp(id, 'ref_address', value);
+}
+
+async function saveLabel(id) {
+  const inp = document.getElementById(`prop-label-${id}`);
+  await updateProp(id, 'label', inp.value);
+}
+
+async function updateProp(id, key, value) {
+  const el = elements.find(e => e.id === id);
+  if (!el) return;
+  el[key] = value;
+  await fetch(`/api/track/${id}`, {
+    method: 'PUT', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({[key]: value})
+  });
+  renderAll(); showProps(id);
+}
+
+// ── Aktionen ──────────────────────────────────
+
+async function rotateSelected() {
+  if (!selectedId) return;
+  const el = elements.find(e => e.id === selectedId);
+  if (!el) return;
+  el.rotation = (el.rotation + 45) % 360;
+  await fetch(`/api/track/${selectedId}`, {
+    method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({rotation: el.rotation})
+  });
+  renderAll(); showProps(selectedId);
+}
+
+async function deleteSelected() {
+  if (!selectedId) return;
+  if (!confirm('Element löschen?')) return;
+  await fetch(`/api/track/${selectedId}`, {method:'DELETE'});
+  elements = elements.filter(e => e.id !== selectedId);
+  selectedId = null;
+  renderAll(); showProps(null);
+}
+
+async function clearTrack() {
+  if (!confirm('Gesamten Gleisplan löschen?')) return;
+  await fetch('/api/track/', {method:'DELETE'});
+  elements = []; renderAll();
+}
+
+async function controlTurnout(address, thrown) {
+  await fetch(`/api/turnouts/${address}/set`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({thrown})
+  });
+}
+
+function selectTool(type, btn) {
+  currentTool = type;
+  document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+}
+
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.key === 'r' || e.key === 'R') rotateSelected();
+  if (e.key === 'Delete') deleteSelected();
+  if (e.key === 'Escape') selectElement(null);
+});
+
+window.onStateUpdate = function(state) {
+  if (state.type === 'turnout_info') {
+    turnoutStates[state.address] = state.thrown;
+    renderAll();
+    const el = document.getElementById(`turnout-state-${state.address}`);
+    if (el) el.innerHTML = `Status: <strong>${state.thrown ? 'Abbiegen' : 'Gerade'}</strong>`;
+  }
+};
+
+loadTrack();
+</script>
+{% endblock %}

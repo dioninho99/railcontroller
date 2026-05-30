@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}– Einstellungen{% endblock %}
+{% block nav_settings %}active{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Einstellungen</h1>
+</div>
+
+<div class="settings-grid">
+
+  <div class="card">
+    <div class="card-header">Z21 Verbindung</div>
+    <div class="card-body">
+      <div class="status-row">
+        <span class="label">Status</span>
+        <span id="set-z21-status" class="status-badge status-offline">–</span>
+      </div>
+      <div class="status-row">
+        <span class="label">Temperatur</span>
+        <span id="set-temp">–</span>
+      </div>
+      <div class="status-row">
+        <span class="label">Versorgungsspannung</span>
+        <span id="set-voltage">–</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">Weichen verwalten</div>
+    <div class="card-body">
+      <div id="settings-turnouts"></div>
+      <div class="add-form">
+        <input type="number" id="new-turnout-addr" placeholder="Adresse" class="input-short">
+        <input type="text"   id="new-turnout-name" placeholder="Name" class="input-grow">
+        <button class="btn btn-primary btn-sm" onclick="addTurnout()">+ Weiche</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">Über RailController</div>
+    <div class="card-body">
+      <div class="status-row"><span class="label">Version</span><span>0.1.0</span></div>
+      <div class="status-row"><span class="label">Protokoll</span><span>Z21 LAN V1.13</span></div>
+      <div class="status-row"><span class="label">API Docs</span>
+        <a href="/docs" target="_blank" class="link">FastAPI Docs →</a></div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadSettings() {
+  const sys = await fetch('/api/system').then(r => r.json());
+  const z21El = document.getElementById('set-z21-status');
+  z21El.textContent = sys.z21_connected ? 'Online' : 'Offline';
+  z21El.className = 'status-badge ' + (sys.z21_connected ? 'status-online' : 'status-offline');
+  document.getElementById('set-temp').textContent = sys.temperature_c ? sys.temperature_c.toFixed(1) + ' °C' : '–';
+  document.getElementById('set-voltage').textContent = sys.supply_voltage_mv ? (sys.supply_voltage_mv/1000).toFixed(1) + ' V' : '–';
+
+  const turnouts = await fetch('/api/turnouts/').then(r => r.json());
+  const div = document.getElementById('settings-turnouts');
+  if (turnouts.length === 0) {
+    div.innerHTML = '<p class="muted">Keine Weichen konfiguriert.</p>';
+  } else {
+    div.innerHTML = turnouts.map(t => `
+      <div class="status-row">
+        <span>${t.name} <span class="muted">(Adr. ${t.address})</span></span>
+        <button class="btn btn-sm btn-danger" onclick="deleteTurnout(${t.address})">Entfernen</button>
+      </div>
+    `).join('');
+  }
+}
+
+async function addTurnout() {
+  const address = parseInt(document.getElementById('new-turnout-addr').value);
+  const name = document.getElementById('new-turnout-name').value.trim();
+  if (!address || !name) { alert('Adresse und Name erforderlich'); return; }
+  const res = await fetch('/api/turnouts/', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({address, name})
+  });
+  if (res.ok) {
+    document.getElementById('new-turnout-addr').value = '';
+    document.getElementById('new-turnout-name').value = '';
+    loadSettings();
+  } else {
+    const err = await res.json();
+    alert(err.detail || 'Fehler');
+  }
+}
+
+async function deleteTurnout(address) {
+  if (!confirm(`Weiche ${address} wirklich entfernen?`)) return;
+  await fetch(`/api/turnouts/${address}`, {method: 'DELETE'});
+  loadSettings();
+}
+
+window.onStateUpdate = function(state) {
+  if (state.type === 'system' || state.type === 'full_state') {
+    if (state.z21_connected !== undefined) {
+      const el = document.getElementById('set-z21-status');
+      el.textContent = state.z21_connected ? 'Online' : 'Offline';
+      el.className = 'status-badge ' + (state.z21_connected ? 'status-online' : 'status-offline');
+    }
+    if (state.temperature_c) document.getElementById('set-temp').textContent = state.temperature_c.toFixed(1) + ' °C';
+    if (state.supply_voltage_mv) document.getElementById('set-voltage').textContent = (state.supply_voltage_mv/1000).toFixed(1) + ' V';
+  }
+};
+
+loadSettings();
+</script>
+{% endblock %}

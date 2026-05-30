@@ -1,0 +1,480 @@
+/* RailController – Stylesheet */
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  /* Akzentfarben: Violett + Grün */
+  --primary:       #7c3aed;
+  --primary-dark:  #6d28d9;
+  --primary-light: #ede9fe;
+  --accent:        #16a34a;
+  --accent-dark:   #15803d;
+  --accent-light:  #dcfce7;
+
+  /* Neutrals */
+  --bg:            #f5f3ff;
+  --bg-card:       #ffffff;
+  --border:        #e5e0f8;
+  --text:          #1e1b2e;
+  --text-muted:    #6b7280;
+
+  /* Semantisch */
+  --warning:       #f59e0b;
+  --danger:        #ef4444;
+  --estop:         #dc2626;
+
+  --radius: 10px;
+  --shadow: 0 1px 4px rgba(124,58,237,.08);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --primary:       #a78bfa;
+    --primary-dark:  #8b5cf6;
+    --primary-light: #2e1a4a;
+    --accent:        #4ade80;
+    --accent-dark:   #22c55e;
+    --accent-light:  #052e16;
+    --bg:            #0f0d1a;
+    --bg-card:       #1a1625;
+    --border:        #2d2a3e;
+    --text:          #f3f0ff;
+    --text-muted:    #9ca3af;
+  }
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* ── Navbar ──────────────────────────────── */
+
+.navbar {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  padding: .75rem 1.5rem;
+  background: var(--bg-card);
+  border-bottom: 2px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  box-shadow: 0 2px 8px rgba(124,58,237,.06);
+}
+
+.navbar-brand { display: flex; align-items: center; gap: .5rem; font-weight: 700; font-size: 1.1rem; color: var(--primary); }
+.brand-icon { font-size: 1.4rem; }
+
+.navbar-links { display: flex; gap: .25rem; flex: 1; }
+.nav-link {
+  padding: .4rem .85rem;
+  border-radius: 6px;
+  color: var(--text-muted);
+  text-decoration: none;
+  font-weight: 500;
+  transition: background .15s, color .15s;
+}
+.nav-link:hover { background: var(--primary-light); color: var(--primary); }
+.nav-link.active { background: var(--primary); color: #fff; }
+
+.navbar-status { display: flex; align-items: center; gap: .75rem; }
+
+/* ── Status Badges ───────────────────────── */
+
+.status-badge {
+  display: inline-block;
+  padding: .2rem .65rem;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.status-online  { background: var(--accent-light); color: var(--accent-dark); }
+.status-offline { background: #fee2e2; color: #b91c1c; }
+.status-warning { background: #fef9c3; color: #854d0e; }
+
+@media (prefers-color-scheme: dark) {
+  .status-offline { background: #7f1d1d; color: #fca5a5; }
+  .status-warning { background: #422006; color: #fcd34d; }
+}
+
+/* ── Buttons ─────────────────────────────── */
+
+.btn {
+  display: inline-flex; align-items: center; gap: .4rem;
+  padding: .45rem 1rem;
+  border: none; border-radius: 7px;
+  font-size: 14px; font-weight: 500;
+  cursor: pointer; transition: opacity .15s, transform .1s;
+  white-space: nowrap;
+}
+.btn:hover { opacity: .88; }
+.btn:active { transform: scale(.97); }
+
+.btn-primary  { background: var(--primary);  color: #fff; }
+.btn-success  { background: var(--accent);   color: #fff; }
+.btn-warning  { background: var(--warning);  color: #fff; }
+.btn-danger   { background: var(--danger);   color: #fff; }
+.btn-ghost    { background: var(--border);   color: var(--text); }
+.btn-sm       { padding: .28rem .65rem; font-size: 13px; }
+.btn-estop    { background: var(--estop); color: #fff; font-weight: 700; letter-spacing: .05em; }
+
+/* ── Layout ──────────────────────────────── */
+
+.main-content { padding: 1.5rem; max-width: 1400px; margin: 0 auto; }
+
+.page-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 1.5rem;
+}
+.page-header h1 { font-size: 1.5rem; font-weight: 700; color: var(--primary); }
+
+.dashboard-grid, .settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 1.25rem;
+}
+
+/* ── Cards ───────────────────────────────── */
+
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.card-header {
+  padding: .85rem 1.25rem;
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+  background: linear-gradient(90deg, var(--primary-light) 0%, transparent 100%);
+  color: var(--primary);
+}
+.card-body { padding: 1rem 1.25rem; }
+.card-link { font-size: 12px; font-weight: 400; color: var(--primary); text-decoration: none; }
+
+.status-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: .45rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.status-row:last-child { border-bottom: none; }
+.label { color: var(--text-muted); font-size: 13px; }
+
+/* ── Inputs ──────────────────────────────── */
+
+input[type="text"],
+input[type="number"] {
+  padding: .4rem .7rem;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+  transition: border-color .15s;
+}
+input[type="text"]:focus,
+input[type="number"]:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary-light);
+}
+
+/* ── Add-Form (Weichen etc.) ─────────────── */
+
+.add-form {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+  flex-wrap: nowrap;
+}
+.input-short { width: 80px; min-width: 60px; flex-shrink: 0; }
+.input-grow  { flex: 1; min-width: 0; }
+
+/* ── Lok-Liste (Dashboard) ───────────────── */
+
+.loco-quick {
+  display: flex; align-items: center; gap: .75rem;
+  padding: .5rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.loco-quick:last-child { border-bottom: none; }
+.loco-icon { font-size: 1.4rem; }
+.loco-name { flex: 1; font-weight: 500; }
+.loco-addr { color: var(--text-muted); font-size: 12px; }
+.loco-speed { font-size: 12px; color: var(--text-muted); min-width: 50px; text-align: right; }
+
+.turnout-quick {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: .4rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.turnout-quick:last-child { border-bottom: none; }
+
+/* ── Lok-Karten (Steuerung) ──────────────── */
+
+.loco-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+  gap: 1.25rem;
+}
+
+.loco-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.loco-card-header {
+  display: flex; align-items: center; gap: .75rem;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(90deg, var(--primary-light) 0%, transparent 120%);
+}
+.loco-icon-lg { font-size: 2rem; }
+.loco-meta { flex: 1; }
+.loco-title { font-size: 1rem; font-weight: 600; color: var(--primary); }
+.loco-subtitle { font-size: 12px; color: var(--text-muted); }
+
+.throttle-section { padding: 1rem 1.25rem; border-bottom: 1px solid var(--border); }
+
+.speed-display {
+  display: flex; align-items: baseline; gap: .25rem;
+  margin-bottom: .5rem;
+}
+.speed-number { font-size: 2rem; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; color: var(--primary); }
+.speed-max { color: var(--text-muted); font-size: .9rem; }
+
+.throttle-slider {
+  width: 100%;
+  height: 6px;
+  appearance: none;
+  background: var(--border);
+  border-radius: 4px;
+  outline: none;
+  cursor: pointer;
+  margin-bottom: .75rem;
+}
+.throttle-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 20px; height: 20px;
+  background: var(--primary);
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: 0 0 0 3px var(--primary-light);
+}
+
+.throttle-controls {
+  display: flex; gap: .5rem; justify-content: space-between; align-items: center;
+}
+.direction-btn { flex: 1; justify-content: center; }
+.direction-btn.active { background: var(--primary); color: #fff; }
+
+/* ── Funktions-Buttons ───────────────────── */
+
+.functions-section { padding: 1rem 1.25rem; }
+.functions-label {
+  font-size: 11px; color: var(--text-muted); font-weight: 600;
+  margin-bottom: .5rem; text-transform: uppercase; letter-spacing: .06em;
+}
+
+.functions-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: .35rem;
+}
+
+.fn-btn {
+  display: flex; flex-direction: column; align-items: center;
+  padding: .4rem .3rem;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg);
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
+  min-height: 44px;
+}
+.fn-btn:hover { border-color: var(--accent); }
+.fn-btn.fn-active { background: var(--accent); border-color: var(--accent-dark); color: #fff; box-shadow: 0 0 0 2px var(--accent-light); }
+.fn-num { font-size: 10px; font-weight: 700; opacity: .7; }
+.fn-name { font-size: 10px; text-align: center; line-height: 1.2; margin-top: 2px; }
+
+/* ── Gleisplan ───────────────────────────── */
+
+.track-toolbar {
+  display: flex; align-items: center; gap: .35rem; flex-wrap: wrap;
+}
+.toolbar-label { font-size: 12px; color: var(--text-muted); }
+.toolbar-sep { width: 1px; height: 24px; background: var(--border); margin: 0 .25rem; }
+
+.tool-btn {
+  width: 36px; height: 36px;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg-card);
+  cursor: pointer;
+  font-size: 1rem;
+  transition: background .15s, border-color .15s;
+}
+.tool-btn:hover { background: var(--primary-light); border-color: var(--primary); }
+.tool-btn.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+
+.track-workspace {
+  display: flex; gap: 1rem; margin-top: 1rem;
+  height: calc(100vh - 200px);
+}
+
+.track-canvas-wrap {
+  flex: 1;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: auto;
+  cursor: crosshair;
+}
+
+#track-canvas { display: block; min-width: 800px; }
+.track-el.selected { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+.track-props {
+  width: 240px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow-y: auto;
+}
+.props-header {
+  padding: .85rem 1rem;
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(90deg, var(--primary-light) 0%, transparent 100%);
+  color: var(--primary);
+}
+#props-content { padding: 1rem; }
+.prop-row {
+  display: flex; flex-direction: column; gap: .25rem;
+  margin-bottom: .75rem;
+}
+.prop-label { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); }
+.prop-row input {
+  padding: .35rem .6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  width: 100%;
+}
+.prop-row input:focus { border-color: var(--primary); outline: none; }
+.prop-actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .5rem; }
+
+/* ── Modal ───────────────────────────────── */
+
+.modal {
+  position: fixed; inset: 0;
+  background: rgba(30,27,46,.6);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 200;
+  backdrop-filter: blur(2px);
+}
+.modal.hidden { display: none; }
+.modal-box {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+  width: 360px;
+  box-shadow: 0 20px 60px rgba(124,58,237,.2);
+}
+.modal-box h2 { font-size: 1.1rem; margin-bottom: 1rem; color: var(--primary); }
+.modal-box label {
+  display: flex; flex-direction: column; gap: .3rem;
+  margin-bottom: .75rem;
+  font-size: 13px; color: var(--text-muted);
+}
+.modal-box input {
+  padding: .45rem .75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+}
+.modal-box input:focus { border-color: var(--primary); outline: none; }
+.modal-actions { display: flex; gap: .5rem; margin-top: 1.25rem; }
+
+/* ── System Controls ─────────────────────── */
+
+.system-controls { display: flex; gap: .5rem; }
+
+/* ── Misc ────────────────────────────────── */
+
+.muted { color: var(--text-muted); font-size: 13px; }
+.loading { color: var(--text-muted); font-style: italic; padding: .5rem 0; }
+.link { color: var(--primary); text-decoration: none; }
+.link:hover { text-decoration: underline; }
+.hidden { display: none !important; }
+
+/* ── Gleisplan Properties Panel ─────────────── */
+
+.prop-section { padding: .85rem 1rem; }
+
+.prop-type-badge {
+  display: inline-block;
+  padding: .25rem .75rem;
+  background: var(--primary);
+  color: #fff;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: .85rem;
+}
+
+.rot-btn {
+  padding: .2rem .45rem;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background .12s;
+}
+.rot-btn:hover { background: var(--primary-light); border-color: var(--primary); }
+.rot-btn.rot-active { background: var(--primary); color: #fff; border-color: var(--primary); }
+
+.prop-turnout-state {
+  margin-top: .6rem;
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: .3rem .5rem;
+  background: var(--bg);
+  border-radius: 5px;
+}
+
+/* ── Funktions-Buttons kontrastreicher ───────── */
+
+.fn-btn {
+  border: 1.5px solid var(--border);
+  background: var(--bg-card);
+}
+.fn-num { color: var(--primary); opacity: 1; font-weight: 700; }
+.fn-name { color: var(--text); font-weight: 500; }
+.fn-btn.fn-active .fn-num  { color: #fff; opacity: .85; }
+.fn-btn.fn-active .fn-name { color: #fff; }
+
+/* ── Gleisplan Canvas Hintergrund (Dark Mode) ── */
+@media (prefers-color-scheme: dark) {
+  #track-canvas rect:first-child { fill: #0f0d1a !important; }
+}
