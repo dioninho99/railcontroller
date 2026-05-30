@@ -7,7 +7,7 @@ services:
     volumes:
       - railcontroller_data:/data
     environment:
-      - Z21_HOST=192.168.100.111   # <-- IP deiner Z21 Start anpassen
+      - Z21_HOST=192.168.0.111
       - Z21_PORT=21105
       - Z21_MOCK=false
       - DATABASE_URL=sqlite:////data/railcontroller.db

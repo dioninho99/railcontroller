@@ -305,7 +305,7 @@ input[type="number"]:focus {
   min-height: 44px;
 }
 .fn-btn:hover { border-color: var(--accent); }
-.fn-btn.fn-active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.fn-btn.fn-active { background: var(--accent); border-color: var(--accent-dark); color: #fff; box-shadow: 0 0 0 2px var(--accent-light); }
 .fn-num { font-size: 10px; font-weight: 700; opacity: .7; }
 .fn-name { font-size: 10px; text-align: center; line-height: 1.2; margin-top: 2px; }
 
@@ -425,3 +425,56 @@ input[type="number"]:focus {
 .link { color: var(--primary); text-decoration: none; }
 .link:hover { text-decoration: underline; }
 .hidden { display: none !important; }
+
+/* ── Gleisplan Properties Panel ─────────────── */
+
+.prop-section { padding: .85rem 1rem; }
+
+.prop-type-badge {
+  display: inline-block;
+  padding: .25rem .75rem;
+  background: var(--primary);
+  color: #fff;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: .85rem;
+}
+
+.rot-btn {
+  padding: .2rem .45rem;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background .12s;
+}
+.rot-btn:hover { background: var(--primary-light); border-color: var(--primary); }
+.rot-btn.rot-active { background: var(--primary); color: #fff; border-color: var(--primary); }
+
+.prop-turnout-state {
+  margin-top: .6rem;
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: .3rem .5rem;
+  background: var(--bg);
+  border-radius: 5px;
+}
+
+/* ── Funktions-Buttons kontrastreicher ───────── */
+
+.fn-btn {
+  border: 1.5px solid var(--border);
+  background: var(--bg-card);
+}
+.fn-num { color: var(--primary); opacity: 1; font-weight: 700; }
+.fn-name { color: var(--text); font-weight: 500; }
+.fn-btn.fn-active .fn-num  { color: #fff; opacity: .85; }
+.fn-btn.fn-active .fn-name { color: #fff; }
+
+/* ── Gleisplan Canvas Hintergrund (Dark Mode) ── */
+@media (prefers-color-scheme: dark) {
+  #track-canvas rect:first-child { fill: #0f0d1a !important; }
+}

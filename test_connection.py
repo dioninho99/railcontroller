@@ -3,7 +3,7 @@ RailController – Z21 Verbindungstest
 Führe dieses Skript lokal aus (ohne Docker) um die Z21-Verbindung zu testen.
 
 Voraussetzung: pip install asyncio
-Aufruf:        python test_connection.py 192.168.0.111
+Aufruf:        python test_connection.py 192.168.1.111
 """
 
 import asyncio
@@ -75,7 +75,7 @@ async def main(host: str):
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Verwendung: python test_connection.py <Z21-IP>")
-        print("Beispiel:   python test_connection.py 192.168.0.111")
+        print("Beispiel:   python test_connection.py 192.168.1.111")
         sys.exit(1)
 
     asyncio.run(main(sys.argv[1]))
