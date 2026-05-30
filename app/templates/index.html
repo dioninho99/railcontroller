@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}– Dashboard{% endblock %}
+{% block nav_home %}active{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Dashboard</h1>
+  <div class="system-controls">
+    <button class="btn btn-success" onclick="powerOn()">Gleis EIN</button>
+    <button class="btn btn-warning" onclick="powerOff()">Gleis AUS</button>
+  </div>
+</div>
+
+<div class="dashboard-grid">
+
+  <!-- System Status -->
+  <div class="card">
+    <div class="card-header">Systemstatus</div>
+    <div class="card-body">
+      <div class="status-row">
+        <span class="label">Gleisspannung</span>
+        <span id="dash-power" class="status-badge status-offline">AUS</span>
+      </div>
+      <div class="status-row">
+        <span class="label">Z21 Verbindung</span>
+        <span id="dash-z21" class="status-badge status-offline">Offline</span>
+      </div>
+      <div class="status-row">
+        <span class="label">Temperatur</span>
+        <span id="dash-temp">–</span>
+      </div>
+      <div class="status-row">
+        <span class="label">Versorgung</span>
+        <span id="dash-voltage">–</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Schnellzugriff Loks -->
+  <div class="card">
+    <div class="card-header">Loks <a href="/locos" class="card-link">Alle anzeigen →</a></div>
+    <div class="card-body" id="dash-locos">
+      <div class="loading">Lade Loks...</div>
+    </div>
+  </div>
+
+  <!-- Schnellzugriff Weichen -->
+  <div class="card">
+    <div class="card-header">Weichen</div>
+    <div class="card-body" id="dash-turnouts">
+      <div class="loading">Lade Weichen...</div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadDashboard() {
+  // Loks laden
+  const locos = await fetch('/api/locos/').then(r => r.json());
+  const locoDiv = document.getElementById('dash-locos');
+  if (locos.length === 0) {
+    locoDiv.innerHTML = '<p class="muted">Keine Loks konfiguriert. <a href="/locos">Lok hinzufügen →</a></p>';
+  } else {
+    locoDiv.innerHTML = locos.map(l => `
+      <div class="loco-quick">
+        <span class="loco-icon">${l.icon}</span>
+        <span class="loco-name">${l.name}</span>
+        <span class="loco-addr">Adr. ${l.address}</span>
+        <span class="loco-speed">${l.state.speed} / 127</span>
+        <a href="/locos#loco-${l.address}" class="btn btn-sm btn-primary">Steuern</a>
+      </div>
+    `).join('');
+  }
+
+  // Weichen laden
+  const turnouts = await fetch('/api/turnouts/').then(r => r.json());
+  const tDiv = document.getElementById('dash-turnouts');
+  if (turnouts.length === 0) {
+    tDiv.innerHTML = '<p class="muted">Keine Weichen konfiguriert.</p>';
+  } else {
+    tDiv.innerHTML = turnouts.map(t => `
+      <div class="turnout-quick">
+        <span class="label">${t.name} (${t.address})</span>
+        <button class="btn btn-sm ${t.thrown ? 'btn-warning' : 'btn-success'}"
+                onclick="setTurnout(${t.address}, ${!t.thrown})">
+          ${t.thrown ? 'Abbiegen' : 'Gerade'}
+        </button>
+      </div>
+    `).join('');
+  }
+}
+
+async function setTurnout(address, thrown) {
+  await fetch(`/api/turnouts/${address}/set`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({thrown})
+  });
+  loadDashboard();
+}
+
+loadDashboard();
+
+// WebSocket State-Updates auf Dashboard anwenden
+window.onStateUpdate = function(state) {
+  if (state.type === 'system' || state.type === 'full_state') {
+    const power = state.track_power;
+    const el = document.getElementById('dash-power');
+    if (el) {
+      el.textContent = power ? 'EIN' : 'AUS';
+      el.className = 'status-badge ' + (power ? 'status-online' : 'status-offline');
+    }
+    const z21el = document.getElementById('dash-z21');
+    if (z21el && state.z21_connected !== undefined) {
+      z21el.textContent = state.z21_connected ? 'Online' : 'Offline';
+      z21el.className = 'status-badge ' + (state.z21_connected ? 'status-online' : 'status-offline');
+    }
+    if (state.temperature_c) document.getElementById('dash-temp').textContent = state.temperature_c.toFixed(1) + ' °C';
+    if (state.supply_voltage_mv) document.getElementById('dash-voltage').textContent = (state.supply_voltage_mv / 1000).toFixed(1) + ' V';
+  }
+  if (state.type === 'turnout_info') loadDashboard();
+};
+</script>
+{% endblock %}

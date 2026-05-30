@@ -1,0 +1,296 @@
+{% extends "base.html" %}
+{% block title %}– Gleisplan{% endblock %}
+{% block nav_track %}active{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Gleisplan</h1>
+  <div class="track-toolbar">
+    <span class="toolbar-label">Element:</span>
+    <button class="tool-btn active" data-type="straight" onclick="selectTool('straight', this)" title="Gerades Gleis">━</button>
+    <button class="tool-btn" data-type="curve" onclick="selectTool('curve', this)" title="Kurve">╭</button>
+    <button class="tool-btn" data-type="turnout" onclick="selectTool('turnout', this)" title="Weiche">⑂</button>
+    <button class="tool-btn" data-type="signal" onclick="selectTool('signal', this)" title="Signal">🚦</button>
+    <button class="tool-btn" data-type="block" onclick="selectTool('block', this)" title="Block">▭</button>
+    <button class="tool-btn" data-type="label" onclick="selectTool('label', this)" title="Beschriftung">T</button>
+    <span class="toolbar-sep"></span>
+    <button class="tool-btn" onclick="rotateSelected()" title="Drehen (R)">↻</button>
+    <button class="tool-btn" onclick="deleteSelected()" title="Löschen (Del)">🗑</button>
+    <span class="toolbar-sep"></span>
+    <button class="btn btn-sm btn-ghost" onclick="clearTrack()">Leeren</button>
+    <button class="btn btn-sm btn-primary" onclick="saveTrack()">Speichern</button>
+  </div>
+</div>
+
+<div class="track-workspace">
+  <!-- Gleisplan Canvas -->
+  <div class="track-canvas-wrap">
+    <svg id="track-canvas" width="100%" viewBox="0 0 2000 1200"
+         onclick="onCanvasClick(event)"
+         oncontextmenu="onCanvasRightClick(event)">
+      <!-- Raster -->
+      <defs>
+        <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+          <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#e5e5e5" stroke-width="0.5"/>
+        </pattern>
+      </defs>
+      <rect width="2000" height="1200" fill="url(#grid)"/>
+      <!-- Elemente werden hier eingefügt -->
+      <g id="track-elements"></g>
+      <!-- Cursor-Vorschau -->
+      <g id="track-preview" opacity="0.5"></g>
+    </svg>
+  </div>
+
+  <!-- Eigenschaften-Panel -->
+  <div class="track-props" id="track-props">
+    <div class="props-header">Eigenschaften</div>
+    <div id="props-content">
+      <p class="muted">Element anklicken um Eigenschaften zu bearbeiten.</p>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ── Zustand ───────────────────────────────────
+
+const GRID = 40;
+let currentTool = 'straight';
+let selectedId = null;
+let elements = [];     // { id, element_type, x, y, rotation, ref_address, label }
+let turnoutStates = {}; // address -> thrown
+
+// ── Gleisplan laden ───────────────────────────
+
+async function loadTrack() {
+  elements = await fetch('/api/track/').then(r => r.json());
+  const turnouts = await fetch('/api/turnouts/').then(r => r.json());
+  turnouts.forEach(t => { turnoutStates[t.address] = t.thrown; });
+  renderAll();
+}
+
+// ── Rendern ───────────────────────────────────
+
+function renderAll() {
+  const g = document.getElementById('track-elements');
+  g.innerHTML = '';
+  elements.forEach(el => g.appendChild(makeElement(el)));
+}
+
+function makeElement(el) {
+  const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+  g.setAttribute('transform', `translate(${el.x + GRID/2}, ${el.y + GRID/2}) rotate(${el.rotation})`);
+  g.setAttribute('data-id', el.id);
+  g.setAttribute('class', 'track-el' + (selectedId === el.id ? ' selected' : ''));
+  g.setAttribute('cursor', 'pointer');
+  g.innerHTML = getElementSVG(el);
+  g.addEventListener('click', (e) => { e.stopPropagation(); selectElement(el.id); });
+  return g;
+}
+
+function getElementSVG(el) {
+  const t = el.element_type;
+  const hs = GRID / 2;
+
+  if (t === 'straight') {
+    return `<line x1="${-hs}" y1="0" x2="${hs}" y2="0" stroke="#555" stroke-width="4" stroke-linecap="round"/>
+            <line x1="${-hs}" y1="0" x2="${hs}" y2="0" stroke="#ccc" stroke-width="2" stroke-linecap="round"/>`;
+  }
+  if (t === 'curve') {
+    return `<path d="M ${-hs} 0 Q 0 0 0 ${-hs}" fill="none" stroke="#555" stroke-width="4" stroke-linecap="round"/>
+            <path d="M ${-hs} 0 Q 0 0 0 ${-hs}" fill="none" stroke="#ccc" stroke-width="2" stroke-linecap="round"/>`;
+  }
+  if (t === 'turnout') {
+    const thrown = turnoutStates[el.ref_address] || false;
+    const activeColor = '#f59e0b';
+    const inactiveColor = '#555';
+    const straightColor = thrown ? inactiveColor : activeColor;
+    const thrownColor = thrown ? activeColor : inactiveColor;
+    const addr = el.ref_address ? `<text x="0" y="${hs - 4}" text-anchor="middle" font-size="9" fill="#888">${el.ref_address}</text>` : '';
+    return `<line x1="${-hs}" y1="0" x2="${hs}" y2="0" stroke="${straightColor}" stroke-width="4" stroke-linecap="round"/>
+            <line x1="${-hs}" y1="0" x2="0" y2="${-hs}" stroke="${thrownColor}" stroke-width="3" stroke-linecap="round" stroke-dasharray="${thrown ? 'none' : '4 2'}"/>
+            ${addr}`;
+  }
+  if (t === 'signal') {
+    return `<circle cx="0" cy="0" r="8" fill="#1a1a1a" stroke="#555" stroke-width="1.5"/>
+            <circle cx="0" cy="0" r="4" fill="#22c55e"/>
+            <line x1="0" y1="8" x2="0" y2="${hs}" stroke="#555" stroke-width="2"/>`;
+  }
+  if (t === 'block') {
+    return `<rect x="${-hs}" y="-6" width="${GRID}" height="12" fill="none" stroke="#6366f1" stroke-width="1.5" rx="3"/>
+            <text x="0" y="4" text-anchor="middle" font-size="9" fill="#6366f1">${el.label || 'Block'}</text>`;
+  }
+  if (t === 'label') {
+    return `<text x="0" y="4" text-anchor="middle" font-size="13" fill="#374151" font-weight="500">${el.label || 'Text'}</text>`;
+  }
+  return `<rect x="${-hs}" y="${-hs}" width="${GRID}" height="${GRID}" fill="#e5e7eb" stroke="#9ca3af" stroke-width="1" rx="4"/>
+          <text x="0" y="4" text-anchor="middle" font-size="9" fill="#374151">${t}</text>`;
+}
+
+// ── Klick auf Canvas → Element platzieren ─────
+
+function onCanvasClick(e) {
+  if (e.target.closest('.track-el')) return;
+  selectElement(null);
+
+  const svg = document.getElementById('track-canvas');
+  const pt = svg.createSVGPoint();
+  pt.x = e.clientX;
+  pt.y = e.clientY;
+  const svgPt = pt.matrixTransform(svg.getScreenCTM().inverse());
+
+  const x = Math.floor(svgPt.x / GRID) * GRID;
+  const y = Math.floor(svgPt.y / GRID) * GRID;
+
+  placeElement(currentTool, x, y);
+}
+
+function onCanvasRightClick(e) {
+  e.preventDefault();
+  rotateSelected();
+}
+
+async function placeElement(type, x, y) {
+  const label = type === 'label' ? prompt('Beschriftung:', '') || 'Text' : '';
+  const ref_address = (type === 'turnout' || type === 'signal')
+    ? parseInt(prompt(`DCC-Adresse für ${type}:`, '1') || '0') || null
+    : null;
+
+  const res = await fetch('/api/track/', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({element_type: type, x, y, rotation: 0, ref_address, label})
+  });
+  const el = await res.json();
+  elements.push(el);
+  renderAll();
+  selectElement(el.id);
+}
+
+// ── Selektion ─────────────────────────────────
+
+function selectElement(id) {
+  selectedId = id;
+  renderAll();
+  showProps(id);
+}
+
+function showProps(id) {
+  const el = elements.find(e => e.id === id);
+  const panel = document.getElementById('props-content');
+  if (!el) {
+    panel.innerHTML = '<p class="muted">Element anklicken um Eigenschaften zu bearbeiten.</p>';
+    return;
+  }
+  panel.innerHTML = `
+    <div class="prop-row"><span class="prop-label">Typ</span><span>${el.element_type}</span></div>
+    <div class="prop-row"><span class="prop-label">Position</span><span>${el.x}, ${el.y}</span></div>
+    <div class="prop-row"><span class="prop-label">Rotation</span><span>${el.rotation}°</span></div>
+    ${el.ref_address != null ? `<div class="prop-row"><span class="prop-label">Adresse</span>
+      <input type="number" value="${el.ref_address}" onchange="updateProp(${el.id}, 'ref_address', parseInt(this.value))"></div>` : ''}
+    ${el.label !== undefined ? `<div class="prop-row"><span class="prop-label">Beschriftung</span>
+      <input type="text" value="${el.label}" onchange="updateProp(${el.id}, 'label', this.value)"></div>` : ''}
+    <div class="prop-actions">
+      <button class="btn btn-sm btn-ghost" onclick="rotateSelected()">Drehen ↻</button>
+      <button class="btn btn-sm btn-danger" onclick="deleteSelected()">Löschen</button>
+    </div>
+    ${el.element_type === 'turnout' && el.ref_address ? `
+    <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border)">
+      <div class="prop-label">Weiche stellen:</div>
+      <div style="display:flex;gap:.5rem;margin-top:.5rem">
+        <button class="btn btn-sm btn-success" onclick="controlTurnout(${el.ref_address}, false)">Gerade</button>
+        <button class="btn btn-sm btn-warning" onclick="controlTurnout(${el.ref_address}, true)">Abbiegen</button>
+      </div>
+    </div>` : ''}
+  `;
+}
+
+async function updateProp(id, key, value) {
+  const el = elements.find(e => e.id === id);
+  if (!el) return;
+  el[key] = value;
+  await fetch(`/api/track/${id}`, {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({[key]: value})
+  });
+  renderAll();
+  showProps(id);
+}
+
+// ── Aktionen ──────────────────────────────────
+
+async function rotateSelected() {
+  if (!selectedId) return;
+  const el = elements.find(e => e.id === selectedId);
+  if (!el) return;
+  el.rotation = (el.rotation + 45) % 360;
+  await fetch(`/api/track/${selectedId}`, {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({rotation: el.rotation})
+  });
+  renderAll();
+  showProps(selectedId);
+}
+
+async function deleteSelected() {
+  if (!selectedId) return;
+  if (!confirm('Element löschen?')) return;
+  await fetch(`/api/track/${selectedId}`, {method: 'DELETE'});
+  elements = elements.filter(e => e.id !== selectedId);
+  selectedId = null;
+  renderAll();
+  showProps(null);
+}
+
+async function clearTrack() {
+  if (!confirm('Gesamten Gleisplan löschen?')) return;
+  await fetch('/api/track/', {method: 'DELETE'});
+  elements = [];
+  renderAll();
+}
+
+async function saveTrack() {
+  // Alle Positionen synchronisieren (bereits per API gespeichert)
+  alert('Gleisplan gespeichert!');
+}
+
+async function controlTurnout(address, thrown) {
+  await fetch(`/api/turnouts/${address}/set`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({thrown})
+  });
+}
+
+// ── Werkzeug wählen ───────────────────────────
+
+function selectTool(type, btn) {
+  currentTool = type;
+  document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+}
+
+// ── Tastatur-Shortcuts ────────────────────────
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'r' || e.key === 'R') rotateSelected();
+  if (e.key === 'Delete' || e.key === 'Backspace') deleteSelected();
+  if (e.key === 'Escape') selectElement(null);
+});
+
+// ── WebSocket Updates ─────────────────────────
+
+window.onStateUpdate = function(state) {
+  if (state.type === 'turnout_info') {
+    turnoutStates[state.address] = state.thrown;
+    renderAll();
+  }
+};
+
+loadTrack();
+</script>
+{% endblock %}

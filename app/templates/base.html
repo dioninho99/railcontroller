@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RailController {% block title %}{% endblock %}</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+<nav class="navbar">
+  <div class="navbar-brand">
+    <span class="brand-icon">🚂</span>
+    <span class="brand-name">RailController</span>
+  </div>
+
+  <div class="navbar-links">
+    <a href="/" class="nav-link {% block nav_home %}{% endblock %}">Dashboard</a>
+    <a href="/locos" class="nav-link {% block nav_locos %}{% endblock %}">Lokomotiven</a>
+    <a href="/track" class="nav-link {% block nav_track %}{% endblock %}">Gleisplan</a>
+    <a href="/settings" class="nav-link {% block nav_settings %}{% endblock %}">Einstellungen</a>
+  </div>
+
+  <div class="navbar-status">
+    <span id="z21-status" class="status-badge status-offline">Z21 offline</span>
+    <button id="btn-estop" class="btn btn-estop" onclick="emergencyStop()">NOTHALT</button>
+  </div>
+</nav>
+
+<main class="main-content">
+  {% block content %}{% endblock %}
+</main>
+
+<script src="/static/js/app.js"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

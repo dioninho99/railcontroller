@@ -1,0 +1,230 @@
+{% extends "base.html" %}
+{% block title %}– Lokomotiven{% endblock %}
+{% block nav_locos %}active{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Lokomotiven</h1>
+  <button class="btn btn-primary" onclick="showAddLoco()">+ Lok hinzufügen</button>
+</div>
+
+<!-- Lok hinzufügen Modal -->
+<div id="modal-add-loco" class="modal hidden">
+  <div class="modal-box">
+    <h2>Lok hinzufügen</h2>
+    <label>DCC-Adresse
+      <input type="number" id="new-addr" min="1" max="9999" placeholder="z.B. 3">
+    </label>
+    <label>Name
+      <input type="text" id="new-name" placeholder="z.B. BR 103">
+    </label>
+    <label>Icon
+      <input type="text" id="new-icon" value="🚂" maxlength="4">
+    </label>
+    <label>Max. Geschwindigkeit
+      <input type="number" id="new-maxspeed" value="127" min="1" max="127">
+    </label>
+    <div class="modal-actions">
+      <button class="btn btn-primary" onclick="addLoco()">Hinzufügen</button>
+      <button class="btn btn-ghost" onclick="hideModal('modal-add-loco')">Abbrechen</button>
+    </div>
+  </div>
+</div>
+
+<div id="loco-list" class="loco-grid">
+  <div class="loading">Lade Lokomotiven...</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let locos = [];
+
+async function loadLocos() {
+  locos = await fetch('/api/locos/').then(r => r.json());
+  renderLocos();
+}
+
+function renderLocos() {
+  const container = document.getElementById('loco-list');
+  if (locos.length === 0) {
+    container.innerHTML = '<p class="muted" style="padding:2rem">Keine Loks konfiguriert. Klicke auf "+ Lok hinzufügen".</p>';
+    return;
+  }
+  container.innerHTML = locos.map(l => renderLoco(l)).join('');
+}
+
+function renderLoco(l) {
+  const s = l.state;
+  const pct = Math.round((s.speed / l.max_speed) * 100);
+  const funcs = Object.entries(l.function_names);
+
+  return `
+  <div class="loco-card" id="loco-${l.address}">
+    <div class="loco-card-header">
+      <span class="loco-icon-lg">${l.icon}</span>
+      <div class="loco-meta">
+        <div class="loco-title">${l.name}</div>
+        <div class="loco-subtitle">DCC ${l.address} · ${l.speed_steps} Stufen</div>
+      </div>
+      <button class="btn btn-sm btn-danger" onclick="deleteLoco(${l.address})" title="Lok entfernen">✕</button>
+    </div>
+
+    <div class="throttle-section">
+      <div class="speed-display">
+        <span id="speed-val-${l.address}" class="speed-number">${s.speed}</span>
+        <span class="speed-max">/ ${l.max_speed}</span>
+      </div>
+      <input type="range" class="throttle-slider"
+             id="throttle-${l.address}"
+             min="0" max="${l.max_speed}" value="${s.speed}"
+             oninput="onThrottle(${l.address}, this.value)"
+             onchange="sendDrive(${l.address})">
+      <div class="throttle-controls">
+        <button class="btn btn-sm btn-ghost direction-btn ${!s.forward ? 'active' : ''}"
+                id="btn-rev-${l.address}"
+                onclick="setDirection(${l.address}, false)">◀ Rückwärts</button>
+        <button class="btn btn-sm btn-warning" onclick="stopLoco(${l.address})">Stop</button>
+        <button class="btn btn-sm btn-ghost direction-btn ${s.forward ? 'active' : ''}"
+                id="btn-fwd-${l.address}"
+                onclick="setDirection(${l.address}, true)">Vorwärts ▶</button>
+      </div>
+    </div>
+
+    <div class="functions-section">
+      <div class="functions-label">Funktionen</div>
+      <div class="functions-grid">
+        ${[0,1,2,3,4,5,6,7,8,9,10,11,12].map(f => {
+          const fname = l.function_names[String(f)] || `F${f}`;
+          const active = s.functions[f] || false;
+          return `<button class="fn-btn ${active ? 'fn-active' : ''}"
+                          id="fn-${l.address}-${f}"
+                          onclick="toggleFunction(${l.address}, ${f})">
+                    <span class="fn-num">F${f}</span>
+                    <span class="fn-name">${fname}</span>
+                  </button>`;
+        }).join('')}
+      </div>
+    </div>
+  </div>`;
+}
+
+// ── Throttle ──────────────────────────────────
+
+let driveTimers = {};
+let locoDirections = {};
+
+function onThrottle(address, value) {
+  document.getElementById(`speed-val-${address}`).textContent = value;
+  clearTimeout(driveTimers[address]);
+  driveTimers[address] = setTimeout(() => sendDrive(address), 100);
+}
+
+async function sendDrive(address) {
+  const slider = document.getElementById(`throttle-${address}`);
+  const speed = parseInt(slider.value);
+  const forward = locoDirections[address] !== false;
+  await fetch(`/api/locos/${address}/drive`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({speed, forward})
+  });
+}
+
+async function stopLoco(address) {
+  document.getElementById(`throttle-${address}`).value = 0;
+  document.getElementById(`speed-val-${address}`).textContent = '0';
+  await fetch(`/api/locos/${address}/stop`, {method: 'POST'});
+}
+
+function setDirection(address, forward) {
+  locoDirections[address] = forward;
+  document.getElementById(`btn-fwd-${address}`).classList.toggle('active', forward);
+  document.getElementById(`btn-rev-${address}`).classList.toggle('active', !forward);
+  sendDrive(address);
+}
+
+// ── Funktionen ────────────────────────────────
+
+let funcStates = {};
+
+async function toggleFunction(address, func) {
+  const key = `${address}-${func}`;
+  const current = funcStates[key] || false;
+  const newState = !current;
+  funcStates[key] = newState;
+
+  const btn = document.getElementById(`fn-${address}-${func}`);
+  if (btn) btn.classList.toggle('fn-active', newState);
+
+  await fetch(`/api/locos/${address}/function`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({function: func, state: newState})
+  });
+}
+
+// ── Lok hinzufügen/löschen ────────────────────
+
+function showAddLoco() {
+  document.getElementById('modal-add-loco').classList.remove('hidden');
+}
+
+async function addLoco() {
+  const address = parseInt(document.getElementById('new-addr').value);
+  const name = document.getElementById('new-name').value.trim();
+  const icon = document.getElementById('new-icon').value.trim() || '🚂';
+  const max_speed = parseInt(document.getElementById('new-maxspeed').value);
+
+  if (!address || !name) { alert('Adresse und Name sind erforderlich'); return; }
+
+  const res = await fetch('/api/locos/', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({address, name, icon, max_speed, speed_steps: 128, function_names: {}})
+  });
+  if (res.ok) {
+    hideModal('modal-add-loco');
+    loadLocos();
+  } else {
+    const err = await res.json();
+    alert(err.detail || 'Fehler');
+  }
+}
+
+async function deleteLoco(address) {
+  if (!confirm(`Lok ${address} wirklich entfernen?`)) return;
+  await fetch(`/api/locos/${address}`, {method: 'DELETE'});
+  loadLocos();
+}
+
+function hideModal(id) {
+  document.getElementById(id).classList.add('hidden');
+}
+
+// ── WebSocket Updates ─────────────────────────
+
+window.onStateUpdate = function(state) {
+  if (state.type === 'loco_info') {
+    const addr = state.address;
+    const speedEl = document.getElementById(`speed-val-${addr}`);
+    const slider  = document.getElementById(`throttle-${addr}`);
+    if (speedEl) speedEl.textContent = state.speed;
+    if (slider)  slider.value = state.speed;
+    locoDirections[addr] = state.forward;
+    const fwd = document.getElementById(`btn-fwd-${addr}`);
+    const rev = document.getElementById(`btn-rev-${addr}`);
+    if (fwd) fwd.classList.toggle('active', state.forward);
+    if (rev) rev.classList.toggle('active', !state.forward);
+    // Funktionen
+    for (const [f, v] of Object.entries(state.functions || {})) {
+      funcStates[`${addr}-${f}`] = v;
+      const btn = document.getElementById(`fn-${addr}-${f}`);
+      if (btn) btn.classList.toggle('fn-active', v);
+    }
+  }
+};
+
+loadLocos();
+</script>
+{% endblock %}
