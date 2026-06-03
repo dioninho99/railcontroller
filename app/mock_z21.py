@@ -36,6 +36,7 @@ class MockZ21Client:
         logger.info("Mock Z21 gestartet (kein echtes Gerät)")
         # Initiale Events senden
         await asyncio.sleep(0.5)
+        self._fire({"type": "z21_online"})
         self._fire({"type": "serial_number", "serial": 99999999})
         self._fire({
             "type": "systemstate",

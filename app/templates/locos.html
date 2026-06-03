@@ -8,25 +8,29 @@
   <button class="btn btn-primary" onclick="showAddLoco()">+ Lok hinzufügen</button>
 </div>
 
-<!-- Lok hinzufügen Modal -->
+<!-- Modal: Lok hinzufügen -->
 <div id="modal-add-loco" class="modal hidden">
   <div class="modal-box">
     <h2>Lok hinzufügen</h2>
-    <label>DCC-Adresse
-      <input type="number" id="new-addr" min="1" max="9999" placeholder="z.B. 3">
-    </label>
-    <label>Name
-      <input type="text" id="new-name" placeholder="z.B. BR 103">
-    </label>
-    <label>Icon
-      <input type="text" id="new-icon" value="🚂" maxlength="4">
-    </label>
-    <label>Max. Geschwindigkeit
-      <input type="number" id="new-maxspeed" value="127" min="1" max="127">
-    </label>
+    <label>DCC-Adresse <input type="number" id="new-addr" min="1" max="9999" placeholder="z.B. 3"></label>
+    <label>Name        <input type="text"   id="new-name" placeholder="z.B. BR 103"></label>
+    <label>Icon        <input type="text"   id="new-icon" value="🚂" maxlength="4"></label>
+    <label>Max. Geschwindigkeit <input type="number" id="new-maxspeed" value="127" min="1" max="127"></label>
     <div class="modal-actions">
       <button class="btn btn-primary" onclick="addLoco()">Hinzufügen</button>
-      <button class="btn btn-ghost" onclick="hideModal('modal-add-loco')">Abbrechen</button>
+      <button class="btn btn-ghost"   onclick="hideModal('modal-add-loco')">Abbrechen</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Funktionen bearbeiten -->
+<div id="modal-edit-funcs" class="modal hidden">
+  <div class="modal-box" style="width:420px">
+    <h2>Funktionen bearbeiten</h2>
+    <div id="func-edit-list"></div>
+    <div class="modal-actions">
+      <button class="btn btn-primary" onclick="saveFunctions()">Speichern</button>
+      <button class="btn btn-ghost"   onclick="hideModal('modal-edit-funcs')">Abbrechen</button>
     </div>
   </div>
 </div>
@@ -39,16 +43,26 @@
 {% block scripts %}
 <script>
 let locos = [];
+let editingFuncAddress = null;
+
+// ── Laden ─────────────────────────────────────
 
 async function loadLocos() {
   locos = await fetch('/api/locos/').then(r => r.json());
+  // Serverseitigen State einlesen (überlebt Tab-Wechsel)
+  const sys = await fetch('/api/system').then(r => r.json());
+  // Lok-States aus full_state übernehmen
+  for (const loco of locos) {
+    const srv = sys.locos?.[String(loco.address)];
+    if (srv) loco.state = srv;
+  }
   renderLocos();
 }
 
 function renderLocos() {
   const container = document.getElementById('loco-list');
   if (locos.length === 0) {
-    container.innerHTML = '<p class="muted" style="padding:2rem">Keine Loks konfiguriert. Klicke auf "+ Lok hinzufügen".</p>';
+    container.innerHTML = '<p class="muted" style="padding:2rem">Keine Loks. Klicke "+ Lok hinzufügen".</p>';
     return;
   }
   container.innerHTML = locos.map(l => renderLoco(l)).join('');
@@ -56,8 +70,8 @@ function renderLocos() {
 
 function renderLoco(l) {
   const s = l.state;
-  const pct = Math.round((s.speed / l.max_speed) * 100);
-  const funcs = Object.entries(l.function_names);
+  const fnNames = l.function_names || {};
+  const fnCount = 13; // F0–F12 anzeigen
 
   return `
   <div class="loco-card" id="loco-${l.address}">
@@ -67,13 +81,17 @@ function renderLoco(l) {
         <div class="loco-title">${l.name}</div>
         <div class="loco-subtitle">DCC ${l.address} · ${l.speed_steps} Stufen</div>
       </div>
-      <button class="btn btn-sm btn-danger" onclick="deleteLoco(${l.address})" title="Lok entfernen">✕</button>
+      <div style="display:flex;gap:.4rem">
+        <button class="btn btn-sm btn-ghost" onclick="openEditFunctions(${l.address})" title="Funktionen benennen">✏️</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteLoco(${l.address})" title="Entfernen">✕</button>
+      </div>
     </div>
 
     <div class="throttle-section">
       <div class="speed-display">
         <span id="speed-val-${l.address}" class="speed-number">${s.speed}</span>
         <span class="speed-max">/ ${l.max_speed}</span>
+        <span class="direction-indicator" id="dir-${l.address}">${s.forward ? '▶' : '◀'}</span>
       </div>
       <input type="range" class="throttle-slider"
              id="throttle-${l.address}"
@@ -82,21 +100,19 @@ function renderLoco(l) {
              onchange="sendDrive(${l.address})">
       <div class="throttle-controls">
         <button class="btn btn-sm btn-ghost direction-btn ${!s.forward ? 'active' : ''}"
-                id="btn-rev-${l.address}"
-                onclick="setDirection(${l.address}, false)">◀ Rückwärts</button>
-        <button class="btn btn-sm btn-warning" onclick="stopLoco(${l.address})">Stop</button>
+                id="btn-rev-${l.address}" onclick="setDirection(${l.address}, false)">◀ Rückwärts</button>
+        <button class="btn btn-sm btn-warning" onclick="stopLoco(${l.address})">■ Stop</button>
         <button class="btn btn-sm btn-ghost direction-btn ${s.forward ? 'active' : ''}"
-                id="btn-fwd-${l.address}"
-                onclick="setDirection(${l.address}, true)">Vorwärts ▶</button>
+                id="btn-fwd-${l.address}" onclick="setDirection(${l.address}, true)">Vorwärts ▶</button>
       </div>
     </div>
 
     <div class="functions-section">
       <div class="functions-label">Funktionen</div>
       <div class="functions-grid">
-        ${[0,1,2,3,4,5,6,7,8,9,10,11,12].map(f => {
-          const fname = l.function_names[String(f)] || `F${f}`;
-          const active = s.functions[f] || false;
+        ${Array.from({length: fnCount}, (_, f) => {
+          const fname = fnNames[String(f)] || `F${f}`;
+          const active = s.functions?.[f] || false;
           return `<button class="fn-btn ${active ? 'fn-active' : ''}"
                           id="fn-${l.address}-${f}"
                           onclick="toggleFunction(${l.address}, ${f})">
@@ -117,16 +133,17 @@ let locoDirections = {};
 function onThrottle(address, value) {
   document.getElementById(`speed-val-${address}`).textContent = value;
   clearTimeout(driveTimers[address]);
-  driveTimers[address] = setTimeout(() => sendDrive(address), 100);
+  driveTimers[address] = setTimeout(() => sendDrive(address), 80);
 }
 
 async function sendDrive(address) {
   const slider = document.getElementById(`throttle-${address}`);
+  if (!slider) return;
   const speed = parseInt(slider.value);
   const forward = locoDirections[address] !== false;
   await fetch(`/api/locos/${address}/drive`, {
     method: 'POST',
-    headers: {'Content-Type': 'application/json'},
+    headers: {'Content-Type':'application/json'},
     body: JSON.stringify({speed, forward})
   });
 }
@@ -134,13 +151,14 @@ async function sendDrive(address) {
 async function stopLoco(address) {
   document.getElementById(`throttle-${address}`).value = 0;
   document.getElementById(`speed-val-${address}`).textContent = '0';
-  await fetch(`/api/locos/${address}/stop`, {method: 'POST'});
+  await fetch(`/api/locos/${address}/stop`, {method:'POST'});
 }
 
 function setDirection(address, forward) {
   locoDirections[address] = forward;
-  document.getElementById(`btn-fwd-${address}`).classList.toggle('active', forward);
-  document.getElementById(`btn-rev-${address}`).classList.toggle('active', !forward);
+  document.getElementById(`btn-fwd-${address}`)?.classList.toggle('active', forward);
+  document.getElementById(`btn-rev-${address}`)?.classList.toggle('active', !forward);
+  document.getElementById(`dir-${address}`).textContent = forward ? '▶' : '◀';
   sendDrive(address);
 }
 
@@ -153,48 +171,73 @@ async function toggleFunction(address, func) {
   const current = funcStates[key] || false;
   const newState = !current;
   funcStates[key] = newState;
-
-  const btn = document.getElementById(`fn-${address}-${func}`);
-  if (btn) btn.classList.toggle('fn-active', newState);
-
+  document.getElementById(`fn-${address}-${func}`)?.classList.toggle('fn-active', newState);
   await fetch(`/api/locos/${address}/function`, {
     method: 'POST',
-    headers: {'Content-Type': 'application/json'},
+    headers: {'Content-Type':'application/json'},
     body: JSON.stringify({function: func, state: newState})
   });
 }
 
-// ── Lok hinzufügen/löschen ────────────────────
+// ── Funktionen bearbeiten ─────────────────────
+
+function openEditFunctions(address) {
+  editingFuncAddress = address;
+  const loco = locos.find(l => l.address === address);
+  if (!loco) return;
+  const names = loco.function_names || {};
+  const list = document.getElementById('func-edit-list');
+  list.innerHTML = Array.from({length: 29}, (_, f) => `
+    <div class="func-edit-row">
+      <span class="func-edit-num">F${f}</span>
+      <input type="text" id="func-name-${f}"
+             value="${names[String(f)] || ''}"
+             placeholder="z.B. Licht, Horn, Pfeife...">
+    </div>
+  `).join('');
+  document.getElementById('modal-edit-funcs').classList.remove('hidden');
+}
+
+async function saveFunctions() {
+  if (!editingFuncAddress) return;
+  const names = {};
+  for (let f = 0; f < 29; f++) {
+    const val = document.getElementById(`func-name-${f}`)?.value.trim();
+    if (val) names[String(f)] = val;
+  }
+  await fetch(`/api/locos/${editingFuncAddress}/functions`, {
+    method: 'PUT',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({function_names: names})
+  });
+  hideModal('modal-edit-funcs');
+  loadLocos();
+}
+
+// ── Lok hinzufügen / löschen ──────────────────
 
 function showAddLoco() {
   document.getElementById('modal-add-loco').classList.remove('hidden');
 }
 
 async function addLoco() {
-  const address = parseInt(document.getElementById('new-addr').value);
-  const name = document.getElementById('new-name').value.trim();
-  const icon = document.getElementById('new-icon').value.trim() || '🚂';
+  const address   = parseInt(document.getElementById('new-addr').value);
+  const name      = document.getElementById('new-name').value.trim();
+  const icon      = document.getElementById('new-icon').value.trim() || '🚂';
   const max_speed = parseInt(document.getElementById('new-maxspeed').value);
-
   if (!address || !name) { alert('Adresse und Name sind erforderlich'); return; }
-
   const res = await fetch('/api/locos/', {
     method: 'POST',
-    headers: {'Content-Type': 'application/json'},
+    headers: {'Content-Type':'application/json'},
     body: JSON.stringify({address, name, icon, max_speed, speed_steps: 128, function_names: {}})
   });
-  if (res.ok) {
-    hideModal('modal-add-loco');
-    loadLocos();
-  } else {
-    const err = await res.json();
-    alert(err.detail || 'Fehler');
-  }
+  if (res.ok) { hideModal('modal-add-loco'); loadLocos(); }
+  else { const e = await res.json(); alert(e.detail || 'Fehler'); }
 }
 
 async function deleteLoco(address) {
   if (!confirm(`Lok ${address} wirklich entfernen?`)) return;
-  await fetch(`/api/locos/${address}`, {method: 'DELETE'});
+  await fetch(`/api/locos/${address}`, {method:'DELETE'});
   loadLocos();
 }
 
@@ -207,20 +250,21 @@ function hideModal(id) {
 window.onStateUpdate = function(state) {
   if (state.type === 'loco_info') {
     const addr = state.address;
+    // Speed
     const speedEl = document.getElementById(`speed-val-${addr}`);
     const slider  = document.getElementById(`throttle-${addr}`);
     if (speedEl) speedEl.textContent = state.speed;
-    if (slider)  slider.value = state.speed;
+    if (slider && !slider.matches(':active')) slider.value = state.speed;
+    // Richtung
     locoDirections[addr] = state.forward;
-    const fwd = document.getElementById(`btn-fwd-${addr}`);
-    const rev = document.getElementById(`btn-rev-${addr}`);
-    if (fwd) fwd.classList.toggle('active', state.forward);
-    if (rev) rev.classList.toggle('active', !state.forward);
+    document.getElementById(`btn-fwd-${addr}`)?.classList.toggle('active', state.forward);
+    document.getElementById(`btn-rev-${addr}`)?.classList.toggle('active', !state.forward);
+    const dirEl = document.getElementById(`dir-${addr}`);
+    if (dirEl) dirEl.textContent = state.forward ? '▶' : '◀';
     // Funktionen
     for (const [f, v] of Object.entries(state.functions || {})) {
       funcStates[`${addr}-${f}`] = v;
-      const btn = document.getElementById(`fn-${addr}-${f}`);
-      if (btn) btn.classList.toggle('fn-active', v);
+      document.getElementById(`fn-${addr}-${f}`)?.classList.toggle('fn-active', v);
     }
   }
 };

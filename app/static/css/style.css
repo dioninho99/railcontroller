@@ -478,3 +478,32 @@ input[type="number"]:focus {
 @media (prefers-color-scheme: dark) {
   #track-canvas rect:first-child { fill: #0f0d1a !important; }
 }
+
+/* ── Richtungsanzeige ────────────────────────── */
+.direction-indicator {
+  font-size: 1.2rem;
+  margin-left: .5rem;
+  color: var(--accent);
+}
+
+/* ── Funktionen bearbeiten Modal ─────────────── */
+.func-edit-row {
+  display: flex; align-items: center; gap: .75rem;
+  padding: .3rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.func-edit-row:last-child { border-bottom: none; }
+.func-edit-num {
+  width: 32px; font-size: 12px; font-weight: 700;
+  color: var(--primary); flex-shrink: 0;
+}
+.func-edit-row input {
+  flex: 1; padding: .3rem .6rem;
+  border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg); color: var(--text); font-size: 13px;
+}
+.func-edit-row input:focus { border-color: var(--primary); outline: none; }
+
+/* Modal scrollbar für lange Listen */
+.modal-box { max-height: 85vh; overflow-y: auto; }
+#func-edit-list { max-height: 55vh; overflow-y: auto; padding-right: .25rem; }

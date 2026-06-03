@@ -25,7 +25,7 @@ logger = logging.getLogger("railcontroller.main")
 
 # ── Konfiguration ─────────────────────────────
 
-Z21_HOST = os.getenv("Z21_HOST", "192.168.0.111")
+Z21_HOST = os.getenv("Z21_HOST", "192.168.100.111")
 Z21_PORT = int(os.getenv("Z21_PORT", "21105"))
 Z21_MOCK = os.getenv("Z21_MOCK", "false").lower() == "true"
 _DB_URL  = os.getenv("DATABASE_URL", "sqlite:////data/railcontroller.db")
