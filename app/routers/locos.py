@@ -112,3 +112,18 @@ async def get_info(address: int, request: Request):
     z21 = request.app.state.z21
     await z21.get_loco_info(address)
     return {"ok": True}
+
+
+class FunctionNamesUpdate(BaseModel):
+    function_names: dict
+
+
+@router.put("/{address}/functions")
+def update_function_names(address: int, data: FunctionNamesUpdate, session: Session = Depends(get_session)):
+    loco = session.exec(select(Locomotive).where(Locomotive.address == address)).first()
+    if not loco:
+        raise HTTPException(status_code=404, detail="Lok nicht gefunden")
+    loco.set_function_names(data.function_names)
+    session.add(loco)
+    session.commit()
+    return {"ok": True}
