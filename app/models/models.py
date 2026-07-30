@@ -111,3 +111,17 @@ def seed_demo_data(engine):
         for t in turnouts:
             session.add(t)
         session.commit()
+
+class Route(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str
+    steps: str = Field(default="[]")   # JSON: [{"address": 1, "thrown": false}, ...]
+
+    def get_steps(self) -> list:
+        try:
+            return json.loads(self.steps)
+        except Exception:
+            return []
+
+    def set_steps(self, steps: list):
+        self.steps = json.dumps(steps)

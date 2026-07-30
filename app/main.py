@@ -15,7 +15,7 @@ from sqlmodel import create_engine, Session, select
 
 from models.models import Locomotive, Turnout, create_db_and_tables, seed_demo_data
 from state import app_state
-from routers import locos, turnouts, track
+from routers import locos, turnouts, track, routes, importer
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "info").upper(),
@@ -105,7 +105,8 @@ templates = Jinja2Templates(directory="templates")
 app.include_router(locos.router)
 app.include_router(turnouts.router)
 app.include_router(track.router)
-
+app.include_router(routes.router)
+app.include_router(importer.router)
 
 # ── System-API ────────────────────────────────
 
@@ -178,3 +179,7 @@ async def track_page(request: Request):
 @app.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request):
     return templates.TemplateResponse("settings.html", {"request": request})
+
+@app.get("/routes", response_class=HTMLResponse)
+async def routes_page(request: Request):
+    return templates.TemplateResponse("routes.html", {"request": request})

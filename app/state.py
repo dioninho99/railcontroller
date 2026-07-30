@@ -135,6 +135,19 @@ class AppState:
                 "thrown": self.turnouts[addr],
             })
 
+    # ── Kommandierter State (überlebt Seitenwechsel) ──
+
+    async def set_loco_drive(self, address: int, speed: int, forward: bool):
+        loco = self.get_loco_state(address)
+        loco.speed = max(0, min(127, speed))
+        loco.forward = forward
+        await self.broadcast({"type": "loco_info", **loco.to_dict()})
+
+    async def set_loco_function_state(self, address: int, function: int, state: bool):
+        loco = self.get_loco_state(address)
+        loco.functions[function] = state
+        await self.broadcast({"type": "loco_info", **loco.to_dict()})
+
     # ── Helpers ─────────────────────────────────
 
     def _sys_dict(self) -> dict:

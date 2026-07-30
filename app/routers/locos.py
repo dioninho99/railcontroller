@@ -127,3 +127,27 @@ def update_function_names(address: int, data: FunctionNamesUpdate, session: Sess
     session.add(loco)
     session.commit()
     return {"ok": True}
+
+@router.post("/{address}/drive")
+async def drive(address: int, cmd: DriveCommand, request: Request):
+    z21 = request.app.state.z21
+    await z21.loco_drive(address, cmd.speed, cmd.forward)
+    await app_state.set_loco_drive(address, cmd.speed, cmd.forward)
+    return {"ok": True}
+
+
+@router.post("/{address}/stop")
+async def stop(address: int, request: Request):
+    z21 = request.app.state.z21
+    await z21.loco_stop(address)
+    forward = app_state.get_loco_state(address).forward
+    await app_state.set_loco_drive(address, 0, forward)
+    return {"ok": True}
+
+
+@router.post("/{address}/function")
+async def function(address: int, cmd: FunctionCommand, request: Request):
+    z21 = request.app.state.z21
+    await z21.loco_function(address, cmd.function, cmd.state)
+    await app_state.set_loco_function_state(address, cmd.function, cmd.state)
+    return {"ok": True}
