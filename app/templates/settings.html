@@ -120,8 +120,9 @@ async function importZ21() {
     if (!r.ok) { out.textContent = 'Fehler: ' + (data.detail || 'unbekannt'); return; }
     out.innerHTML =
       `${data.locos_imported} Loks, ${data.turnouts_imported} Weichen, ` +
-      `${data.routes_imported} Fahrstraßen importiert.` +
-      (data.locos_skipped ? `<br>${data.locos_skipped} Loks übersprungen (Adresse schon vorhanden/doppelt).` : '') +
+      `${data.routes_imported} Fahrstraßen, ${data.track_imported} Gleisplan-Elemente ` +
+      `(Seite „${data.track_page}") importiert.` +
+      (data.locos_skipped ? `<br>${data.locos_skipped} Loks übersprungen (Adresse doppelt/vorhanden).` : '') +
       (data.route_steps_dropped ? `<br>${data.route_steps_dropped} Fahrstraßen-Schritte übersprungen (3-Wege/Signal).` : '');
     loadSettings();
   } catch (e) { out.textContent = 'Fehler: ' + e; }

@@ -1,21 +1,20 @@
 """RailController – Import von Z21-App-Dateien (.z21)
 
-Format: ZIP mit export/<UUID>/Loco.sqlite (+ Lokbilder).
-Getestet gegen Z21-App-Export. Tabellen: vehicles, functions,
-control_station_controls, control_station_control_states,
-control_station_routes, control_station_route_list.
+Format: ZIP mit export/<UUID>/Loco.sqlite. Importiert Loks, Weichen,
+Fahrstraßen und den Gleisplan (Seite mit den meisten Elementen).
+Mehrfach-Import ist sicher: Loks/Weichen/Routen werden übersprungen,
+der Gleisplan wird ersetzt.
 """
 
 from fastapi import APIRouter, UploadFile, File, Request, HTTPException
 from sqlmodel import Session, select
 import io, os, json, zipfile, sqlite3, tempfile, logging
 
-from models.models import Locomotive, Turnout, Route
+from models.models import Locomotive, Turnout, Route, TrackElement
 
 logger = logging.getLogger("railcontroller.import")
 router = APIRouter(prefix="/api/import", tags=["import"])
 
-# Funktionssymbole der Z21-App -> lesbare Labels (Fallback wenn kein shortcut gesetzt)
 IMG_LABELS = {
     "light": "Licht", "light2": "Fernlicht", "back_light": "Rücklicht",
     "bugle": "Horn", "sound1": "Sound", "sound2": "Sound", "sound3": "Sound",
@@ -25,8 +24,16 @@ IMG_LABELS = {
 }
 
 
+def _track_type(t: int) -> str:
+    """Z21 control-type -> track.html element_type (best effort)."""
+    if t in (1, 2, 3):   return "turnout"
+    if t == 28:          return "curve"
+    if t in (10, 12, 23): return "signal"
+    return "straight"    # Geraden + unbekannte Gleisstücke
+
+
 def _extract_sqlite(raw: bytes) -> bytes:
-    if raw[:2] == b"PK":  # ZIP-Archiv
+    if raw[:2] == b"PK":
         with zipfile.ZipFile(io.BytesIO(raw)) as z:
             names = z.namelist()
             target = next((n for n in names if n.lower().endswith("loco.sqlite")), None) \
@@ -65,11 +72,9 @@ def _parse(db_bytes: bytes) -> dict:
         for r in con.execute("SELECT id,name,address FROM vehicles ORDER BY position"):
             if not r["address"]:
                 continue
-            locos.append({
-                "address": r["address"],
-                "name": (r["name"] or f"Lok {r['address']}").strip(),
-                "function_names": funcs.get(r["id"], {}),
-            })
+            locos.append({"address": r["address"],
+                          "name": (r["name"] or f"Lok {r['address']}").strip(),
+                          "function_names": funcs.get(r["id"], {})})
 
         # Weichen (adressierte Stellpult-Elemente)
         turnouts = {}
@@ -85,8 +90,7 @@ def _parse(db_bytes: bytes) -> dict:
                 steps, dropped = [], 0
                 for s in con.execute(
                     "SELECT * FROM control_station_route_list WHERE route_id=? ORDER BY position",
-                    (route["id"],)
-                ):
+                    (route["id"],)):
                     st = con.execute(
                         "SELECT state,address1_value FROM control_station_control_states WHERE id=?",
                         (s["state_id"],)).fetchone()
@@ -94,20 +98,42 @@ def _parse(db_bytes: bytes) -> dict:
                     ctrl = con.execute(
                         "SELECT address1 FROM control_station_controls WHERE id=?",
                         (int(cid),)).fetchone() if cid and str(cid).isdigit() else None
-                    # nur binäre Weichenschritte (keine Signale, keine 3-Wege-Stellungen)
                     if not st or not ctrl or not ctrl["address1"] or s["signal_id"] or st["state"] not in (0, 1):
-                        dropped += 1
-                        continue
+                        dropped += 1; continue
                     steps.append({"address": ctrl["address1"], "thrown": bool(st["address1_value"])})
                 if steps:
                     routes.append({"name": route["name"] or "Fahrstraße",
                                    "steps": steps, "dropped": dropped})
 
+        # Gleisplan: Seite mit den meisten echten Elementen
+        track, track_page = [], None
+        if "control_station_controls" in tables:
+            page = con.execute(
+                "SELECT page_id FROM control_station_controls WHERE type<>0 "
+                "GROUP BY page_id ORDER BY COUNT(*) DESC LIMIT 1").fetchone()
+            if page:
+                pid = page["page_id"]
+                pn = con.execute("SELECT name FROM control_station_pages WHERE id=?", (pid,)).fetchone()
+                track_page = pn["name"] if pn else str(pid)
+                cells = [dict(r) for r in con.execute(
+                    "SELECT x,y,angle,type,address1 FROM control_station_controls "
+                    "WHERE page_id=? AND type<>0", (pid,))]
+                if cells:
+                    minx = min(c["x"] for c in cells); miny = min(c["y"] for c in cells)
+                    for c in cells:
+                        track.append({
+                            "element_type": _track_type(c["type"]),
+                            "x": (c["x"] - minx) * 40,
+                            "y": (c["y"] - miny) * 40,
+                            "rotation": int(c["angle"]) % 360,
+                            "ref_address": c["address1"] or None,
+                        })
         con.close()
     finally:
         os.unlink(path)
 
-    return {"locos": locos, "turnouts": turnouts, "routes": routes}
+    return {"locos": locos, "turnouts": turnouts, "routes": routes,
+            "track": track, "track_page": track_page}
 
 
 @router.post("/z21")
@@ -115,46 +141,49 @@ async def import_z21(request: Request, file: UploadFile = File(...)):
     raw = await file.read()
     parsed = _parse(_extract_sqlite(raw))
 
-    loco_imported = loco_skipped = 0
-    turnout_imported = route_imported = 0
-    dropped_steps = 0
+    loco_imported = loco_skipped = turnout_imported = 0
+    route_imported = dropped_steps = track_imported = 0
 
     with Session(request.app.state.engine) as session:
-        # Loks
+        # Loks (vorhandene Adressen überspringen)
         for l in parsed["locos"]:
             if session.exec(select(Locomotive).where(Locomotive.address == l["address"])).first():
-                loco_skipped += 1
-                continue
-            session.add(Locomotive(
-                address=l["address"], name=l["name"],
-                max_speed=127, speed_steps=128,
-                function_names=json.dumps(l["function_names"]),
-            ))
+                loco_skipped += 1; continue
+            session.add(Locomotive(address=l["address"], name=l["name"],
+                                   max_speed=127, speed_steps=128,
+                                   function_names=json.dumps(l["function_names"])))
             loco_imported += 1
 
         # Weichen
         for addr, name in sorted(parsed["turnouts"].items()):
             if session.exec(select(Turnout).where(Turnout.address == addr)).first():
                 continue
-            session.add(Turnout(address=addr, name=name))
-            turnout_imported += 1
+            session.add(Turnout(address=addr, name=name)); turnout_imported += 1
 
-        # Fahrstraßen (mit Nummerierung, da in der App oft namensgleich)
+        # Fahrstraßen (nach Name deduplizieren -> Re-Import sicher)
         for i, rt in enumerate(parsed["routes"], 1):
             dropped_steps += rt["dropped"]
             name = f"{rt['name']} #{i}"
-            r = Route(name=name)
-            r.set_steps(rt["steps"])
-            session.add(r)
-            route_imported += 1
+            if session.exec(select(Route).where(Route.name == name)).first():
+                continue
+            r = Route(name=name); r.set_steps(rt["steps"])
+            session.add(r); route_imported += 1
+
+        # Gleisplan (ersetzt vorhandenen Plan komplett)
+        if parsed["track"]:
+            for el in session.exec(select(TrackElement)).all():
+                session.delete(el)
+            for e in parsed["track"]:
+                session.add(TrackElement(
+                    element_type=e["element_type"], x=e["x"], y=e["y"],
+                    rotation=e["rotation"], ref_address=e["ref_address"],
+                    label="", properties="{}"))
+                track_imported += 1
 
         session.commit()
 
-    return {
-        "ok": True,
-        "locos_imported": loco_imported,
-        "locos_skipped": loco_skipped,       # doppelte/vorhandene Adressen
-        "turnouts_imported": turnout_imported,
-        "routes_imported": route_imported,
-        "route_steps_dropped": dropped_steps,  # 3-Wege-/Signalschritte
-    }
+    return {"ok": True,
+            "locos_imported": loco_imported, "locos_skipped": loco_skipped,
+            "turnouts_imported": turnout_imported,
+            "routes_imported": route_imported, "route_steps_dropped": dropped_steps,
+            "track_imported": track_imported, "track_page": parsed["track_page"]}
