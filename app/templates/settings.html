@@ -118,8 +118,11 @@ async function importZ21() {
     const r = await fetch('/api/import/z21', {method: 'POST', body: fd});
     const data = await r.json();
     if (!r.ok) { out.textContent = 'Fehler: ' + (data.detail || 'unbekannt'); return; }
-    out.innerHTML = `${data.imported} Loks importiert, ${data.skipped} übersprungen.` +
-      (data.detected_columns ? `<br>Erkannte Spalten: ${data.detected_columns.join(', ')}` : '');
+    out.innerHTML =
+      `${data.locos_imported} Loks, ${data.turnouts_imported} Weichen, ` +
+      `${data.routes_imported} Fahrstraßen importiert.` +
+      (data.locos_skipped ? `<br>${data.locos_skipped} Loks übersprungen (Adresse schon vorhanden/doppelt).` : '') +
+      (data.route_steps_dropped ? `<br>${data.route_steps_dropped} Fahrstraßen-Schritte übersprungen (3-Wege/Signal).` : '');
     loadSettings();
   } catch (e) { out.textContent = 'Fehler: ' + e; }
 }

@@ -1,29 +1,32 @@
-"""RailController – Import von Z21-App-Dateien (.z21)"""
+"""RailController – Import von Z21-App-Dateien (.z21)
+
+Format: ZIP mit export/<UUID>/Loco.sqlite (+ Lokbilder).
+Getestet gegen Z21-App-Export. Tabellen: vehicles, functions,
+control_station_controls, control_station_control_states,
+control_station_routes, control_station_route_list.
+"""
 
 from fastapi import APIRouter, UploadFile, File, Request, HTTPException
 from sqlmodel import Session, select
 import io, os, json, zipfile, sqlite3, tempfile, logging
 
-from models.models import Locomotive
+from models.models import Locomotive, Turnout, Route
 
 logger = logging.getLogger("railcontroller.import")
 router = APIRouter(prefix="/api/import", tags=["import"])
 
-
-def _pick(cols, candidates, contains=None):
-    lower = {c.lower(): c for c in cols}
-    for cand in candidates:
-        if cand in lower:
-            return lower[cand]
-    if contains:
-        for c in cols:
-            if all(part in c.lower() for part in contains):
-                return c
-    return None
+# Funktionssymbole der Z21-App -> lesbare Labels (Fallback wenn kein shortcut gesetzt)
+IMG_LABELS = {
+    "light": "Licht", "light2": "Fernlicht", "back_light": "Rücklicht",
+    "bugle": "Horn", "sound1": "Sound", "sound2": "Sound", "sound3": "Sound",
+    "weight": "Rangiergang",
+    "forward_take_power": "Anfahren vorwärts", "backward_take_power": "Anfahren rückwärts",
+    "cockpit_light_left": "Führerstand links", "cockpit_light_right": "Führerstand rechts",
+}
 
 
 def _extract_sqlite(raw: bytes) -> bytes:
-    if raw[:2] == b"PK":  # ZIP
+    if raw[:2] == b"PK":  # ZIP-Archiv
         with zipfile.ZipFile(io.BytesIO(raw)) as z:
             names = z.namelist()
             target = next((n for n in names if n.lower().endswith("loco.sqlite")), None) \
@@ -38,74 +41,120 @@ def _extract_sqlite(raw: bytes) -> bytes:
     raise HTTPException(400, "Unbekanntes Format (weder ZIP noch SQLite).")
 
 
-@router.post("/z21")
-async def import_z21(request: Request, file: UploadFile = File(...)):
-    raw = await file.read()
-    db_bytes = _extract_sqlite(raw)
-
+def _parse(db_bytes: bytes) -> dict:
     with tempfile.NamedTemporaryFile(suffix=".sqlite", delete=False) as tmp:
-        tmp.write(db_bytes); tmp_path = tmp.name
-
+        tmp.write(db_bytes); path = tmp.name
     try:
-        con = sqlite3.connect(f"file:{tmp_path}?mode=ro", uri=True)
+        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
         con.row_factory = sqlite3.Row
-        tables = [r[0] for r in con.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+        tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
 
         if "vehicles" not in tables:
-            raise HTTPException(400, f"Tabelle 'vehicles' nicht gefunden. Tabellen: {tables}")
+            raise HTTPException(400, f"Tabelle 'vehicles' nicht gefunden. Tabellen: {sorted(tables)}")
 
-        vcols = [r["name"] for r in con.execute("PRAGMA table_info(vehicles)").fetchall()]
-        addr_col  = _pick(vcols, ["address","addr","locoaddress","dccaddress","loco_address"], ["addr"])
-        name_col  = _pick(vcols, ["name","title","loconame","description"], ["name"])
-        speed_col = _pick(vcols, ["maxspeed","vmax","max_speed"], ["max","speed"])
-        if not addr_col:
-            raise HTTPException(400, f"Keine Adress-Spalte erkannt. Spalten: {vcols}")
-
-        rows = con.execute("SELECT rowid, * FROM vehicles").fetchall()
-
-        func_map = {}
+        # Funktionsnamen je Fahrzeug
+        funcs: dict[int, dict] = {}
         if "functions" in tables:
-            try:
-                fcols = [r["name"] for r in con.execute("PRAGMA table_info(functions)").fetchall()]
-                veh_col   = _pick(fcols, ["vehicle_id","loco_id","parent_id","vehicleid"], ["vehicle"])
-                num_col   = _pick(fcols, ["shortcut","button","position","index","number","nr"], ["button"])
-                fname_col = _pick(fcols, ["name","title","text","label"], ["name"])
-                if veh_col and num_col and fname_col:
-                    for fr in con.execute(f'SELECT "{veh_col}","{num_col}","{fname_col}" FROM functions').fetchall():
-                        if fr[fname_col]:
-                            func_map.setdefault(fr[veh_col], {})[str(int(fr[num_col]))] = str(fr[fname_col])
-            except Exception as e:
-                logger.warning(f"Funktions-Import übersprungen: {e}")
+            for r in con.execute("SELECT vehicle_id,function,shortcut,image_name FROM functions"):
+                label = (r["shortcut"] or "").strip() or IMG_LABELS.get(r["image_name"])
+                if label:
+                    funcs.setdefault(r["vehicle_id"], {})[str(r["function"])] = label
+
+        # Loks
+        locos = []
+        for r in con.execute("SELECT id,name,address FROM vehicles ORDER BY position"):
+            if not r["address"]:
+                continue
+            locos.append({
+                "address": r["address"],
+                "name": (r["name"] or f"Lok {r['address']}").strip(),
+                "function_names": funcs.get(r["id"], {}),
+            })
+
+        # Weichen (adressierte Stellpult-Elemente)
+        turnouts = {}
+        if "control_station_controls" in tables:
+            for r in con.execute("SELECT address1 FROM control_station_controls WHERE address1>0"):
+                turnouts.setdefault(r["address1"], f"Weiche {r['address1']}")
+
+        # Fahrstraßen
+        routes = []
+        if {"control_station_routes", "control_station_route_list",
+            "control_station_control_states"} <= tables:
+            for route in con.execute("SELECT id,name FROM control_station_routes"):
+                steps, dropped = [], 0
+                for s in con.execute(
+                    "SELECT * FROM control_station_route_list WHERE route_id=? ORDER BY position",
+                    (route["id"],)
+                ):
+                    st = con.execute(
+                        "SELECT state,address1_value FROM control_station_control_states WHERE id=?",
+                        (s["state_id"],)).fetchone()
+                    cid = s["control_id"]
+                    ctrl = con.execute(
+                        "SELECT address1 FROM control_station_controls WHERE id=?",
+                        (int(cid),)).fetchone() if cid and str(cid).isdigit() else None
+                    # nur binäre Weichenschritte (keine Signale, keine 3-Wege-Stellungen)
+                    if not st or not ctrl or not ctrl["address1"] or s["signal_id"] or st["state"] not in (0, 1):
+                        dropped += 1
+                        continue
+                    steps.append({"address": ctrl["address1"], "thrown": bool(st["address1_value"])})
+                if steps:
+                    routes.append({"name": route["name"] or "Fahrstraße",
+                                   "steps": steps, "dropped": dropped})
 
         con.close()
     finally:
-        os.unlink(tmp_path)
+        os.unlink(path)
 
-    imported = skipped = 0
+    return {"locos": locos, "turnouts": turnouts, "routes": routes}
+
+
+@router.post("/z21")
+async def import_z21(request: Request, file: UploadFile = File(...)):
+    raw = await file.read()
+    parsed = _parse(_extract_sqlite(raw))
+
+    loco_imported = loco_skipped = 0
+    turnout_imported = route_imported = 0
+    dropped_steps = 0
+
     with Session(request.app.state.engine) as session:
-        for r in rows:
-            try:
-                address = int(r[addr_col])
-            except (TypeError, ValueError):
+        # Loks
+        for l in parsed["locos"]:
+            if session.exec(select(Locomotive).where(Locomotive.address == l["address"])).first():
+                loco_skipped += 1
                 continue
-            if not address:
+            session.add(Locomotive(
+                address=l["address"], name=l["name"],
+                max_speed=127, speed_steps=128,
+                function_names=json.dumps(l["function_names"]),
+            ))
+            loco_imported += 1
+
+        # Weichen
+        for addr, name in sorted(parsed["turnouts"].items()):
+            if session.exec(select(Turnout).where(Turnout.address == addr)).first():
                 continue
-            if session.exec(select(Locomotive).where(Locomotive.address == address)).first():
-                skipped += 1; continue
-            name = str(r[name_col]).strip() if name_col and r[name_col] else f"Lok {address}"
-            max_speed = 127
-            if speed_col and r[speed_col]:
-                try:
-                    v = int(r[speed_col])
-                    if 1 <= v <= 127: max_speed = v
-                except (TypeError, ValueError):
-                    pass
-            fnames = func_map.get(r["rowid"], {}) or func_map.get(address, {})
-            session.add(Locomotive(address=address, name=name, max_speed=max_speed,
-                                   function_names=json.dumps(fnames)))
-            imported += 1
+            session.add(Turnout(address=addr, name=name))
+            turnout_imported += 1
+
+        # Fahrstraßen (mit Nummerierung, da in der App oft namensgleich)
+        for i, rt in enumerate(parsed["routes"], 1):
+            dropped_steps += rt["dropped"]
+            name = f"{rt['name']} #{i}"
+            r = Route(name=name)
+            r.set_steps(rt["steps"])
+            session.add(r)
+            route_imported += 1
+
         session.commit()
 
-    return {"ok": True, "imported": imported, "skipped": skipped,
-            "tables": tables, "detected_columns": [c for c in [addr_col, name_col, speed_col] if c]}
+    return {
+        "ok": True,
+        "locos_imported": loco_imported,
+        "locos_skipped": loco_skipped,       # doppelte/vorhandene Adressen
+        "turnouts_imported": turnout_imported,
+        "routes_imported": route_imported,
+        "route_steps_dropped": dropped_steps,  # 3-Wege-/Signalschritte
+    }
