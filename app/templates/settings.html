@@ -28,6 +28,18 @@
   </div>
 
   <div class="card">
+    <div class="card-header">Z21-Datei importieren</div>
+      <div class="card-body">
+        <p class="muted">.z21-Anlagendatei aus der Z21-App. Loks werden übernommen, vorhandene Adressen übersprungen.</p>
+        <div class="add-form">
+          <input type="file" id="z21-file" accept=".z21,.zip,.sqlite" class="input-grow">
+          <button class="btn btn-primary btn-sm" onclick="importZ21()">Importieren</button>
+        </div>
+      <div id="import-result" class="muted" style="margin-top:.6rem"></div>
+    </div>
+  </div>
+
+  <div class="card">
     <div class="card-header">Weichen verwalten</div>
     <div class="card-body">
       <div id="settings-turnouts"></div>
@@ -93,6 +105,26 @@ async function addTurnout() {
     const err = await res.json();
     alert(err.detail || 'Fehler');
   }
+}
+
+async function importZ21() {
+  const inp = document.getElementById('z21-file');
+  if (!inp.files.length) { alert('Bitte Datei wählen'); return; }
+  const fd = new FormData();
+  fd.append('file', inp.files[0]);
+  const out = document.getElementById('import-result');
+  out.textContent = 'Importiere...';
+  try {
+    const r = await fetch('/api/import/z21', {method: 'POST', body: fd});
+    const data = await r.json();
+    if (!r.ok) { out.textContent = 'Fehler: ' + (data.detail || 'unbekannt'); return; }
+    out.innerHTML =
+      `${data.locos_imported} Loks, ${data.turnouts_imported} Weichen, ` +
+      `${data.routes_imported} Fahrstraßen importiert.` +
+      (data.locos_skipped ? `<br>${data.locos_skipped} Loks übersprungen (Adresse schon vorhanden/doppelt).` : '') +
+      (data.route_steps_dropped ? `<br>${data.route_steps_dropped} Fahrstraßen-Schritte übersprungen (3-Wege/Signal).` : '');
+    loadSettings();
+  } catch (e) { out.textContent = 'Fehler: ' + e; }
 }
 
 async function deleteTurnout(address) {

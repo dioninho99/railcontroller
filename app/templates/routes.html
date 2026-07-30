@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block title %}– Fahrstraßen{% endblock %}
+{% block nav_routes %}active{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Fahrstraßen</h1>
+</div>
+
+<div class="dashboard-grid">
+  <div class="card">
+    <div class="card-header" id="editor-title">Neue Fahrstraße</div>
+    <div class="card-body">
+      <label class="label">Name</label>
+      <input type="text" id="route-name" placeholder="z.B. Ausfahrt Gleis 1" style="width:100%;margin-bottom:1rem">
+      <div id="turnout-picker"><p class="muted">Lade Weichen...</p></div>
+      <div class="modal-actions">
+        <button class="btn btn-primary" onclick="saveRoute()">Speichern</button>
+        <button class="btn btn-ghost" onclick="resetEditor()">Zurücksetzen</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">Gespeicherte Fahrstraßen</div>
+    <div class="card-body" id="route-list"><p class="muted">Lade...</p></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let turnouts = [];
+let routes = [];
+let editingId = null;
+
+async function loadAll() {
+  turnouts = await fetch('/api/turnouts/').then(r => r.json());
+  routes   = await fetch('/api/routes/').then(r => r.json());
+  renderPicker();
+  renderRoutes();
+}
+
+function renderPicker(selected = {}) {
+  const div = document.getElementById('turnout-picker');
+  if (turnouts.length === 0) {
+    div.innerHTML = '<p class="muted">Keine Weichen konfiguriert. Erst unter Einstellungen anlegen.</p>';
+    return;
+  }
+  div.innerHTML = turnouts.map(t => {
+    const sel = selected[t.address];
+    const included = sel !== undefined;
+    const thrown = included ? sel : false;
+    return `
+      <div class="status-row">
+        <label style="display:flex;align-items:center;gap:.5rem;flex:1">
+          <input type="checkbox" id="inc-${t.address}" ${included ? 'checked' : ''}>
+          ${t.name} <span class="muted">(${t.address})</span>
+        </label>
+        <div style="display:flex;gap:.35rem">
+          <button class="btn btn-sm ${!thrown ? 'btn-success' : 'btn-ghost'}" id="pos-g-${t.address}"
+                  onclick="setPos(${t.address}, false)">Gerade</button>
+          <button class="btn btn-sm ${thrown ? 'btn-warning' : 'btn-ghost'}" id="pos-a-${t.address}"
+                  onclick="setPos(${t.address}, true)">Abbiegen</button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+const posState = {};
+function setPos(address, thrown) {
+  posState[address] = thrown;
+  document.getElementById(`inc-${address}`).checked = true;
+  document.getElementById(`pos-g-${address}`).className = 'btn btn-sm ' + (!thrown ? 'btn-success' : 'btn-ghost');
+  document.getElementById(`pos-a-${address}`).className = 'btn btn-sm ' + (thrown ? 'btn-warning' : 'btn-ghost');
+}
+
+function collectSteps() {
+  return turnouts
+    .filter(t => document.getElementById(`inc-${t.address}`)?.checked)
+    .map(t => ({address: t.address, thrown: posState[t.address] || false}));
+}
+
+async function saveRoute() {
+  const name = document.getElementById('route-name').value.trim();
+  const steps = collectSteps();
+  if (!name) { alert('Name erforderlich'); return; }
+  if (steps.length === 0) { alert('Mindestens eine Weiche auswählen'); return; }
+  const url = editingId ? `/api/routes/${editingId}` : '/api/routes/';
+  await fetch(url, {
+    method: editingId ? 'PUT' : 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name, steps})
+  });
+  resetEditor();
+  loadAll();
+}
+
+function editRoute(id) {
+  const r = routes.find(x => x.id === id);
+  if (!r) return;
+  editingId = id;
+  document.getElementById('editor-title').textContent = 'Fahrstraße bearbeiten';
+  document.getElementById('route-name').value = r.name;
+  const selected = {};
+  r.steps.forEach(s => { selected[s.address] = s.thrown; posState[s.address] = s.thrown; });
+  renderPicker(selected);
+}
+
+function resetEditor() {
+  editingId = null;
+  document.getElementById('editor-title').textContent = 'Neue Fahrstraße';
+  document.getElementById('route-name').value = '';
+  for (const k in posState) delete posState[k];
+  renderPicker();
+}
+
+function renderRoutes() {
+  const div = document.getElementById('route-list');
+  if (routes.length === 0) { div.innerHTML = '<p class="muted">Noch keine Fahrstraßen.</p>'; return; }
+  div.innerHTML = routes.map(r => `
+    <div class="status-row">
+      <span>${r.name} <span class="muted">(${r.steps.length} Weichen)</span></span>
+      <div style="display:flex;gap:.35rem">
+        <button class="btn btn-sm btn-success" onclick="runRoute(${r.id})">▶ Fahren</button>
+        <button class="btn btn-sm btn-ghost" onclick="editRoute(${r.id})">✏️</button>
+        <button class="btn btn-sm btn-danger" onclick="delRoute(${r.id})">✕</button>
+      </div>
+    </div>`).join('');
+}
+
+async function runRoute(id) {
+  await fetch(`/api/routes/${id}/execute`, {method: 'POST'});
+}
+
+async function delRoute(id) {
+  if (!confirm('Fahrstraße löschen?')) return;
+  await fetch(`/api/routes/${id}`, {method: 'DELETE'});
+  loadAll();
+}
+
+loadAll();
+</script>
+{% endblock %}
