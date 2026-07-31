@@ -5,12 +5,16 @@ Fahrstraßen und den Gleisplan (Seite mit den meisten Elementen).
 Mehrfach-Import ist sicher: Loks/Weichen/Routen werden übersprungen,
 der Gleisplan wird ersetzt.
 
-Gleisplan-Rekonstruktion (korrigiert):
-  * type=0 sind GERADEN (keine Leerzellen) – werden jetzt importiert.
+Gleisplan-Rekonstruktion:
+  * type=0 sind GERADEN (keine Leerzellen) – werden importiert.
   * Z21-Winkel 90/270 = waagrecht, 0/180 = senkrecht. In track.html ist
-    eine Gerade bei rotation 0 waagrecht -> rotation = (angle+90) % 180.
-  * Kurven (type 28): Drehung primär aus den belegten Nachbarn abgeleitet,
-    ersatzweise aus dem Winkel.
+    eine Gerade bei rotation 0 waagrecht -> rotation = (angle+90) % 180
+    (deckt auch die 45°-Diagonalen ab).
+  * Kurven (type 28): Drehung per gewichteter Best-Fit-Suche – gewählt wird
+    die Orientierung, deren beide Bogen-Enden am besten zu belegten Nachbarn
+    passen (Diagonal-Nachbarn zählen halb). Der Z21-Winkel dient nur als
+    Tiebreaker. Reine Diagonalläufe ohne Kardinal-Nachbar werden als
+    diagonale Gerade dargestellt.
 """
 
 from fastapi import APIRouter, UploadFile, File, Request, HTTPException
@@ -31,47 +35,65 @@ IMG_LABELS = {
 }
 
 
-# ── Gleisplan: Z21 control-type/angle -> track.html element_type/rotation ──
+# ── Gleisplan-Geometrie ────────────────────────────────────────────
 
-# track.html-Kurve bei rotation r verbindet: 0={W,N} 90={N,E} 180={E,S} 270={S,W}
-_PAIR2ROT = {frozenset("WN"): 0, frozenset("NE"): 90,
-             frozenset("ES"): 180, frozenset("SW"): 270}
-
-# Ersatz-Zuordnung Kurvenwinkel -> Drehung, wenn Nachbarschaft nicht eindeutig
-# (aus den eindeutigen Zellen der Beispielanlage abgeleitet)
-_CURVE_ANGLE_FALLBACK = {0: 0, 45: 270, 90: 90, 135: 0,
-                         180: 180, 225: 0, 270: 270, 315: 180}
-
-
-def _elem_type(t: int) -> str:
-    """Z21 control-type -> track.html element_type."""
-    if t in (1, 2, 3):    return "turnout"
-    if t == 28:           return "curve"
-    if t in (10, 12, 23): return "signal"
-    return "straight"     # type 0, 39 und übrige Gleisstücke
+_DIRV = {"N": (0, -1), "E": (1, 0), "S": (0, 1), "W": (-1, 0)}          # Kardinal-Nachbarn
+_DIAGV = {"NE": (1, -1), "SE": (1, 1), "SW": (-1, 1), "NW": (-1, -1)}   # Diagonal-Nachbarn
+_DIAG_COMP = {"NE": ("N", "E"), "SE": ("S", "E"), "SW": ("S", "W"), "NW": ("N", "W")}
+# track.html-Kurve bei rotation r verbindet diese zwei Seiten:
+_SIDES = {0: ("W", "N"), 90: ("N", "E"), 180: ("E", "S"), 270: ("S", "W")}
+# Tiebreaker: Kurvenwinkel -> bevorzugte Drehung
+_CURVE_ANGLE = {0: 0, 45: 270, 90: 90, 135: 0, 180: 180, 225: 0, 270: 270, 315: 180}
 
 
-def _rotation(cell: dict, occ: set) -> int:
-    """track.html-Rotation aus Z21-Winkel und ggf. Nachbarschaft."""
+def _occ(occ, x, y, d):
+    dx, dy = _DIRV[d]
+    return (x + dx, y + dy) in occ
+
+
+def _diag_axis(occ, x, y):
+    ne = (x + 1, y - 1) in occ; sw = (x - 1, y + 1) in occ
+    se = (x + 1, y + 1) in occ; nw = (x - 1, y - 1) in occ
+    if (ne or sw) and not (se or nw): return 135   # "/"
+    if (se or nw) and not (ne or sw): return 45    # "\"
+    return None
+
+
+def _reconstruct(cell: dict, occ: set):
+    """Z21-Zelle -> (element_type, rotation) für track.html."""
     t = cell["type"]
     a = int(cell["angle"]) % 360
-    et = _elem_type(t)
+    x, y = cell["x"], cell["y"]
 
-    if et == "straight":
-        # 90/270 (waagrecht) -> 0 ; 0/180 (senkrecht) -> 90 ; Diagonalen -> 45/135
-        return (a + 90) % 180
+    if t in (1, 2, 3):
+        return "turnout", (a + 90) % 360
+    if t in (10, 12, 23):
+        return "signal", (a + 90) % 360
 
-    if et == "curve":
-        x, y = cell["x"], cell["y"]
-        nb = {d for d, (dx, dy) in (("N", (0, -1)), ("E", (1, 0)),
-                                    ("S", (0, 1)), ("W", (-1, 0)))
-              if (x + dx, y + dy) in occ}
-        if len(nb) == 2 and frozenset(nb) in _PAIR2ROT:
-            return _PAIR2ROT[frozenset(nb)]
-        return _CURVE_ANGLE_FALLBACK.get(a, 0)
+    if t == 28:  # Kurve
+        card_occ = [d for d in _DIRV if _occ(occ, x, y, d)]
+        # reiner Diagonallauf ohne kardinalen Nachbar -> diagonale Gerade
+        if not card_occ:
+            da = _diag_axis(occ, x, y)
+            if da is not None:
+                return "straight", da
+        # belegte Diagonalen in Kardinal-Komponenten zerlegen (halbes Gewicht)
+        comp = set()
+        for k, (dx, dy) in _DIAGV.items():
+            if (x + dx, y + dy) in occ:
+                comp.update(_DIAG_COMP[k])
+        best, best_score = 0, -1.0
+        for r, (p, q) in _SIDES.items():
+            score = 0.0
+            for side in (p, q):
+                if _occ(occ, x, y, side):   score += 1.0
+                elif side in comp:          score += 0.5
+            if score > best_score or (score == best_score and r == _CURVE_ANGLE.get(a, -1)):
+                best, best_score = r, score
+        return "curve", best
 
-    # turnout / signal: durchgehende Route wie bei Geraden ausrichten
-    return (a + 90) % 360
+    # type 0, 39 und übrige Gleisstücke -> Gerade
+    return "straight", (a + 90) % 180
 
 
 def _extract_sqlite(raw: bytes) -> bytes:
@@ -163,11 +185,12 @@ def _parse(db_bytes: bytes) -> dict:
                 if cells:
                     minx = min(c["x"] for c in cells); miny = min(c["y"] for c in cells)
                     for c in cells:
+                        et, rot = _reconstruct(c, occ)
                         track.append({
-                            "element_type": _elem_type(c["type"]),
+                            "element_type": et,
                             "x": (c["x"] - minx) * 40,
                             "y": (c["y"] - miny) * 40,
-                            "rotation": _rotation(c, occ),
+                            "rotation": rot,
                             "ref_address": c["address1"] or None,
                         })
         con.close()
