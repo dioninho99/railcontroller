@@ -301,20 +301,44 @@ function getElementSVG(el) {
       <path d="M ${-hs} 0 Q 0 0 0 ${-hs}" fill="none" stroke="#3b1fa8" stroke-width="5" stroke-linecap="butt"/>
       <path d="M ${-hs} 0 Q 0 0 0 ${-hs}" fill="none" stroke="#c4b0fa" stroke-width="2" stroke-linecap="butt"/>`;
   }
-  if (t === 'turnout') {
+  // Weichen-Familie: durchgehende Route senkrecht (bei rotation 0), Abzweig je Typ.
+  // turnout_r = Rechtsweiche (NE), turnout_l = Linksweiche (NW), slip = Kreuzungsweiche.
+  if (t === 'turnout' || t === 'turnout_r' || t === 'turnout_l' || t === 'slip') {
     const thrown = turnoutStates[el.ref_address] || false;
-    const straightColor = thrown ? '#888' : '#d97706';
-    const thrownColor   = thrown ? '#d97706' : '#888';
+    const mainColor   = thrown ? '#888' : '#d97706';   // durchgehend (gerade)
+    const branchColor = thrown ? '#d97706' : '#888';   // Abzweig (abbiegen)
     const addr = el.ref_address
-      ? `<rect x="-11" y="${hs-18}" width="22" height="14" rx="3" fill="#1e1b2e" fill-opacity="0.7"/>
-         <text x="0" y="${hs-8}" text-anchor="middle" font-size="9" font-weight="700" fill="#fbbf24">${el.ref_address}</text>`
-      : `<rect x="-14" y="${hs-18}" width="28" height="14" rx="3" fill="#ef4444" fill-opacity="0.8"/>
-         <text x="0" y="${hs-8}" text-anchor="middle" font-size="8" font-weight="700" fill="#fff">kein Adr.</text>`;
+      ? `<rect x="-11" y="${hs-16}" width="22" height="13" rx="3" fill="#1e1b2e" fill-opacity="0.75"/>
+         <text x="0" y="${hs-6}" text-anchor="middle" font-size="9" font-weight="700" fill="#fbbf24">${el.ref_address}</text>`
+      : `<rect x="-14" y="${hs-16}" width="28" height="13" rx="3" fill="#ef4444" fill-opacity="0.85"/>
+         <text x="0" y="${hs-6}" text-anchor="middle" font-size="8" font-weight="700" fill="#fff">kein Adr.</text>`;
+    const through = `<line x1="0" y1="${-hs}" x2="0" y2="${hs}" stroke="${mainColor}" stroke-width="5" stroke-linecap="butt"/>`;
+    let branch;
+    if (t === 'turnout_l')      branch = `<line x1="0" y1="2" x2="${-hs}" y2="${-hs}" stroke="${branchColor}" stroke-width="4" stroke-linecap="round"/>`;
+    else if (t === 'slip')      branch = `<line x1="${-hs}" y1="${-hs}" x2="${hs}" y2="${hs}" stroke="${branchColor}" stroke-width="4" stroke-linecap="butt"/>`;
+    else                        branch = `<line x1="0" y1="2" x2="${hs}" y2="${-hs}" stroke="${branchColor}" stroke-width="4" stroke-linecap="round"/>`;
     return `
-      <rect x="${-hs}" y="${-hs}" width="${GRID}" height="${GRID}" rx="4" fill="#d97706" fill-opacity="0.10" stroke="#d97706" stroke-opacity="0.30" stroke-width="1" pointer-events="all"/>
-      <line x1="${-hs}" y1="0" x2="${hs}" y2="0" stroke="${straightColor}" stroke-width="5" stroke-linecap="butt"/>
-      <line x1="${-hs}" y1="0" x2="4" y2="${-hs+4}" stroke="${thrownColor}" stroke-width="4" stroke-linecap="round"/>
+      <rect x="${-hs}" y="${-hs}" width="${GRID}" height="${GRID}" rx="4" fill="#d97706" fill-opacity="0.08" stroke="#d97706" stroke-opacity="0.25" stroke-width="1" pointer-events="all"/>
+      ${through}
+      ${branch}
       ${addr}`;
+  }
+  // Kreuzung (nicht schaltbar): Gerade N-S kreuzt Gerade E-W
+  if (t === 'cross') {
+    return `
+      <rect x="${-hs}" y="${-hs}" width="${GRID}" height="${GRID}" fill="transparent" pointer-events="all"/>
+      <line x1="0" y1="${-hs}" x2="0" y2="${hs}" stroke="#3b1fa8" stroke-width="5"/>
+      <line x1="${-hs}" y1="0" x2="${hs}" y2="0" stroke="#3b1fa8" stroke-width="5"/>
+      <line x1="0" y1="${-hs}" x2="0" y2="${hs}" stroke="#c4b0fa" stroke-width="2"/>
+      <line x1="${-hs}" y1="0" x2="${hs}" y2="0" stroke="#c4b0fa" stroke-width="2"/>`;
+  }
+  // Prellbock: Stummel von unten + Endbalken
+  if (t === 'bumper') {
+    return `
+      <rect x="${-hs}" y="${-hs}" width="${GRID}" height="${GRID}" fill="transparent" pointer-events="all"/>
+      <line x1="0" y1="${hs}" x2="0" y2="-2" stroke="#3b1fa8" stroke-width="5" stroke-linecap="butt"/>
+      <line x1="0" y1="${hs}" x2="0" y2="-2" stroke="#c4b0fa" stroke-width="2" stroke-linecap="butt"/>
+      <line x1="-7" y1="-2" x2="7" y2="-2" stroke="#ef4444" stroke-width="3" stroke-linecap="round"/>`;
   }
   if (t === 'signal') {
     return `
@@ -430,7 +454,10 @@ function showProps(id) {
     return;
   }
 
-  const typeLabels = {straight:'Gerades Gleis', curve:'Kurve', turnout:'Weiche', signal:'Signal', block:'Block', label:'Beschriftung'};
+  const typeLabels = {straight:'Gerades Gleis', curve:'Kurve', turnout:'Weiche',
+    turnout_r:'Weiche (rechts)', turnout_l:'Weiche (links)', slip:'Kreuzungsweiche',
+    cross:'Kreuzung', bumper:'Prellbock', signal:'Signal', block:'Block', label:'Beschriftung'};
+  const isTurnout = ['turnout','turnout_r','turnout_l','slip'].includes(el.element_type);
 
   panel.innerHTML = `
     <div class="prop-section">
@@ -445,7 +472,7 @@ function showProps(id) {
         </div>
       </div>
 
-      ${el.element_type === 'turnout' || el.element_type === 'signal' ? `
+      ${isTurnout || el.element_type === 'signal' ? `
       <div class="prop-row">
         <span class="prop-label">DCC-Adresse</span>
         <div style="display:flex;gap:.4rem;align-items:center">
@@ -471,7 +498,7 @@ function showProps(id) {
       </div>
     </div>
 
-    ${el.element_type === 'turnout' && el.ref_address ? `
+    ${isTurnout && el.ref_address ? `
     <div class="prop-section" style="border-top:1px solid var(--border)">
       <div class="prop-label" style="margin-bottom:.6rem">Weiche ${el.ref_address} stellen</div>
       <div style="display:flex;gap:.5rem">

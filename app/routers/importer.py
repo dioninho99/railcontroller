@@ -60,15 +60,26 @@ def _diag_axis(occ, x, y):
 
 
 def _reconstruct(cell: dict, occ: set):
-    """Z21-Zelle -> (element_type, rotation) für track.html."""
+    """Z21-Zelle -> (element_type, rotation) für track.html.
+
+    Kanonische Basis (angle 0): durchgehende Route senkrecht (N-S) – wie die
+    Geraden. Weichen/Kreuzungen/Prellböcke übernehmen daher den Z21-Winkel
+    direkt (roh), ihre Sprites in track.html sind bei rotation 0 senkrecht.
+    Aus den Beispieldaten dekodiert:
+      type 1 = Rechtsweiche (Abzweig NE), type 2 = Linksweiche (Abzweig NW),
+      type 3 = Kreuzungsweiche (N-S + NW-SE), type 45 = Kreuzung (N-S + E-W),
+      type 30 = Prellbock, type 0/39/31/38/24/37/14 = Gerade.
+    """
     t = cell["type"]
     a = int(cell["angle"]) % 360
     x, y = cell["x"], cell["y"]
 
-    if t in (1, 2, 3):
-        return "turnout", (a + 90) % 360
-    if t in (10, 12, 23):
-        return "signal", (a + 90) % 360
+    if t == 1:            return "turnout_r", a
+    if t == 2:            return "turnout_l", a
+    if t == 3:            return "slip", a
+    if t == 45:           return "cross", a
+    if t == 30:           return "bumper", a
+    if t in (10, 12, 23): return "signal", a
 
     if t == 28:  # Kurve
         card_occ = [d for d in _DIRV if _occ(occ, x, y, d)]
