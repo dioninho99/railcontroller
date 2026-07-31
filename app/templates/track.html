@@ -3,6 +3,89 @@
 {% block nav_track %}active{% endblock %}
 
 {% block content %}
+<style>
+  /* Gleisplan-spezifische Optimierungen (nur auf dieser Seite) */
+  :root {
+    --canvas-bg:   #f8f6ff;
+    --grid-line:   #e0d8fb;
+    --grid-major:  #cebff8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --canvas-bg:  #0f0d1a;
+      --grid-line:  #211c33;
+      --grid-major: #2c2547;
+    }
+  }
+
+  .track-workspace {
+    height: calc(100vh - 168px);
+    min-height: 480px;
+  }
+
+  .track-canvas-wrap {
+    position: relative;
+    overflow: hidden;               /* Navigation läuft über viewBox, nicht Scrollbars */
+    background: var(--canvas-bg);
+    cursor: crosshair;
+  }
+  .track-canvas-wrap.pan-mode { cursor: grab; }
+  .track-canvas-wrap.panning  { cursor: grabbing; }
+
+  #track-canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    min-width: 0;                   /* alte min-width:800px überschreiben */
+  }
+
+  /* Schwebende Navigations-Steuerung unten rechts auf der Leinwand */
+  .canvas-nav {
+    position: absolute;
+    right: .75rem;
+    bottom: .75rem;
+    display: flex;
+    align-items: center;
+    gap: .25rem;
+    padding: .3rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: 0 4px 16px rgba(30,27,46,.18);
+  }
+  .canvas-nav button {
+    width: 30px; height: 30px;
+    display: flex; align-items: center; justify-content: center;
+    border: none; border-radius: 7px;
+    background: transparent; color: var(--text);
+    font-size: 1rem; cursor: pointer;
+    transition: background .12s;
+  }
+  .canvas-nav button:hover { background: var(--primary-light); color: var(--primary); }
+  .canvas-nav .zoom-label {
+    min-width: 46px; text-align: center;
+    font-size: 12px; font-variant-numeric: tabular-nums;
+    color: var(--text-muted); user-select: none;
+  }
+  .canvas-nav .nav-sep { width: 1px; height: 20px; background: var(--border); margin: 0 .15rem; }
+
+  /* Element-Zähler / leerer Zustand oben links */
+  .canvas-hint {
+    position: absolute;
+    left: .75rem; top: .75rem;
+    font-size: 12px; color: var(--text-muted);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: .3rem .6rem;
+    pointer-events: none;
+    max-width: 240px;
+  }
+  .canvas-hint strong { color: var(--primary); }
+
+  .zoom-tool { font-weight: 700; }
+</style>
+
 <div class="page-header">
   <h1>Gleisplan</h1>
   <div class="track-toolbar">
@@ -14,8 +97,10 @@
     <button class="tool-btn" data-type="block" onclick="selectTool('block', this)" title="Block">▭</button>
     <button class="tool-btn" data-type="label" onclick="selectTool('label', this)" title="Beschriftung">T</button>
     <span class="toolbar-sep"></span>
+    <button class="tool-btn" data-type="pan" onclick="selectTool('pan', this)" title="Verschieben (Leertaste halten + ziehen)">✋</button>
+    <span class="toolbar-sep"></span>
     <button class="tool-btn" onclick="rotateSelected()" title="Drehen (R)">↻</button>
-    <button class="tool-btn" onclick="deleteSelected()" title="Löschen (Del)">🗑</button>
+    <button class="tool-btn" onclick="deleteSelected()" title="Löschen (Entf)">🗑</button>
     <span class="toolbar-sep"></span>
     <button class="btn btn-sm btn-ghost" onclick="clearTrack()">Leeren</button>
   </div>
@@ -23,20 +108,31 @@
 
 <div class="track-workspace">
   <div class="track-canvas-wrap">
-    <svg id="track-canvas" width="100%" viewBox="0 0 2000 1200"
-         onclick="onCanvasClick(event)"
-         oncontextmenu="onCanvasRightClick(event)">
-         <rect width="2000" height="1300" fill="#f8f6ff"/>
-         <rect width="2000" height="1300" fill="url(#grid)"/>
+    <svg id="track-canvas" xmlns="http://www.w3.org/2000/svg"
+         viewBox="0 0 2000 1300" preserveAspectRatio="xMidYMid meet">
       <defs>
         <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
-          <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#c4b8f0" stroke-width="0.5"/>
+          <path d="M 40 0 L 0 0 0 40" fill="none" stroke="var(--grid-line)" stroke-width="1"/>
+        </pattern>
+        <pattern id="grid-major" width="200" height="200" patternUnits="userSpaceOnUse">
+          <rect width="200" height="200" fill="url(#grid)"/>
+          <path d="M 200 0 L 0 0 0 200" fill="none" stroke="var(--grid-major)" stroke-width="1.5"/>
         </pattern>
       </defs>
-      <rect width="2000" height="1200" fill="#f8f6ff"/>
-      <rect width="2000" height="1200" fill="url(#grid)"/>
+      <rect id="backdrop" x="-6000" y="-6000" width="16000" height="16000" fill="var(--canvas-bg)"/>
+      <rect id="gridrect" x="-6000" y="-6000" width="16000" height="16000" fill="url(#grid-major)"/>
       <g id="track-elements"></g>
     </svg>
+
+    <div class="canvas-hint" id="canvas-hint"></div>
+
+    <div class="canvas-nav">
+      <button onclick="zoomBy(1/1.25)" title="Verkleinern">−</button>
+      <span class="zoom-label" id="zoom-label">100 %</span>
+      <button onclick="zoomBy(1.25)" title="Vergrößern">+</button>
+      <span class="nav-sep"></span>
+      <button onclick="fitToContent()" title="Einpassen (F)">⤢</button>
+    </div>
   </div>
 
   <!-- Eigenschaften-Panel -->
@@ -52,10 +148,101 @@
 {% block scripts %}
 <script>
 const GRID = 40;
+const MIN_VIEW_W = 400;     // stärkste Vergrößerung
+const MAX_VIEW_W = 8000;    // stärkste Verkleinerung
+const DEFAULT_VIEW = { x: 0, y: 0, w: 2000, h: 1300 };
+
 let currentTool = 'straight';
-let selectedId = null;
-let elements = [];
+let selectedId  = null;
+let elements    = [];
 let turnoutStates = {};
+
+let view = { ...DEFAULT_VIEW };
+
+// Pan-/Drag-Zustand
+let isPanning = false;
+let spaceDown = false;
+let dragStart = null;
+let movedWhilePanning = false;
+
+const svgEl  = () => document.getElementById('track-canvas');
+const wrapEl = () => document.querySelector('.track-canvas-wrap');
+
+// ── Ansicht (viewBox) ─────────────────────────
+
+function applyView() {
+  const s = svgEl();
+  s.setAttribute('viewBox', `${view.x} ${view.y} ${view.w} ${view.h}`);
+  const scale = (s.clientWidth || 1) / view.w;
+  const label = document.getElementById('zoom-label');
+  if (label) label.textContent = Math.round(scale * 100) + ' %';
+}
+
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+function screenToWorld(clientX, clientY) {
+  const s = svgEl();
+  const pt = s.createSVGPoint();
+  pt.x = clientX; pt.y = clientY;
+  return pt.matrixTransform(s.getScreenCTM().inverse());
+}
+
+function zoomAt(clientX, clientY, factor) {
+  const world = screenToWorld(clientX, clientY);
+  const newW  = clamp(view.w / factor, MIN_VIEW_W, MAX_VIEW_W);
+  const ratio = newW / view.w;
+  view.x = world.x - (world.x - view.x) * ratio;
+  view.y = world.y - (world.y - view.y) * ratio;
+  view.w = newW;
+  view.h = view.h * ratio;
+  applyView();
+}
+
+function zoomBy(factor) {
+  const r = wrapEl().getBoundingClientRect();
+  zoomAt(r.left + r.width / 2, r.top + r.height / 2, factor);
+}
+
+function fitToContent() {
+  const s = svgEl();
+  const cw = s.clientWidth  || 1000;
+  const ch = s.clientHeight || 600;
+  const ar = cw / ch;
+
+  if (elements.length === 0) {
+    view = { x: 0, y: 0, w: DEFAULT_VIEW.h * ar, h: DEFAULT_VIEW.h };
+    applyView();
+    return;
+  }
+
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const el of elements) {
+    minX = Math.min(minX, el.x);
+    minY = Math.min(minY, el.y);
+    maxX = Math.max(maxX, el.x + GRID);
+    maxY = Math.max(maxY, el.y + GRID);
+  }
+  const pad = GRID * 2;
+  minX -= pad; minY -= pad; maxX += pad; maxY += pad;
+
+  const boxW = maxX - minX, boxH = maxY - minY;
+  let w, h;
+  if (boxW / boxH > ar) { w = boxW; h = boxW / ar; }
+  else                  { h = boxH; w = boxH * ar; }
+
+  view = { x: minX - (w - boxW) / 2, y: minY - (h - boxH) / 2, w, h };
+  applyView();
+}
+
+function updateHint() {
+  const hint = document.getElementById('canvas-hint');
+  if (!hint) return;
+  if (elements.length === 0) {
+    hint.innerHTML = 'Leer. Werkzeug wählen und auf die Leinwand klicken.';
+  } else {
+    hint.innerHTML = `<strong>${elements.length}</strong> Elemente · Scrollen = Zoom · Leertaste + ziehen = verschieben`;
+  }
+}
 
 // ── Laden ─────────────────────────────────────
 
@@ -64,6 +251,8 @@ async function loadTrack() {
   const turnouts = await fetch('/api/turnouts/').then(r => r.json());
   turnouts.forEach(t => { turnoutStates[t.address] = t.thrown; });
   renderAll();
+  updateHint();
+  fitToContent();   // beim Öffnen automatisch auf den Plan einpassen
 }
 
 // ── Rendern ───────────────────────────────────
@@ -81,7 +270,6 @@ function makeElement(el) {
   g.setAttribute('cursor', 'pointer');
 
   if (selectedId === el.id) {
-    // Auswahl-Highlight
     const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
     bg.setAttribute('x', -GRID/2 - 4); bg.setAttribute('y', -GRID/2 - 4);
     bg.setAttribute('width', GRID + 8); bg.setAttribute('height', GRID + 8);
@@ -104,14 +292,14 @@ function getElementSVG(el) {
   if (t === 'straight') {
     return `
       <rect x="${-hs}" y="-8" width="${GRID}" height="16" rx="3" fill="#e8e0fc" fill-opacity="0.6"/>
-      <line x1="${-hs+2}" y1="0" x2="${hs-2}" y2="0" stroke="#3b1fa8" stroke-width="5" stroke-linecap="round"/>
-      <line x1="${-hs+2}" y1="0" x2="${hs-2}" y2="0" stroke="#c4b0fa" stroke-width="2" stroke-linecap="round"/>`;
+      <line x1="${-hs}" y1="0" x2="${hs}" y2="0" stroke="#3b1fa8" stroke-width="5" stroke-linecap="butt"/>
+      <line x1="${-hs}" y1="0" x2="${hs}" y2="0" stroke="#c4b0fa" stroke-width="2" stroke-linecap="butt"/>`;
   }
   if (t === 'curve') {
     return `
       <rect x="${-hs}" y="${-hs}" width="${GRID}" height="${GRID}" rx="3" fill="#e8e0fc" fill-opacity="0.4"/>
-      <path d="M ${-hs+2} 0 Q 0 0 0 ${-hs+2}" fill="none" stroke="#3b1fa8" stroke-width="5" stroke-linecap="round"/>
-      <path d="M ${-hs+2} 0 Q 0 0 0 ${-hs+2}" fill="none" stroke="#c4b0fa" stroke-width="2" stroke-linecap="round"/>`;
+      <path d="M ${-hs} 0 Q 0 0 0 ${-hs}" fill="none" stroke="#3b1fa8" stroke-width="5" stroke-linecap="butt"/>
+      <path d="M ${-hs} 0 Q 0 0 0 ${-hs}" fill="none" stroke="#c4b0fa" stroke-width="2" stroke-linecap="butt"/>`;
   }
   if (t === 'turnout') {
     const thrown = turnoutStates[el.ref_address] || false;
@@ -124,8 +312,8 @@ function getElementSVG(el) {
          <text x="0" y="${hs-8}" text-anchor="middle" font-size="8" font-weight="700" fill="#fff">kein Adr.</text>`;
     return `
       <rect x="${-hs}" y="${-hs}" width="${GRID}" height="${GRID}" rx="3" fill="#fef9c3" fill-opacity="0.5"/>
-      <line x1="${-hs+2}" y1="0" x2="${hs-2}" y2="0" stroke="${straightColor}" stroke-width="5" stroke-linecap="round"/>
-      <line x1="${-hs+2}" y1="0" x2="4" y2="${-hs+4}" stroke="${thrownColor}" stroke-width="4" stroke-linecap="round"/>
+      <line x1="${-hs}" y1="0" x2="${hs}" y2="0" stroke="${straightColor}" stroke-width="5" stroke-linecap="butt"/>
+      <line x1="${-hs}" y1="0" x2="4" y2="${-hs+4}" stroke="${thrownColor}" stroke-width="4" stroke-linecap="round"/>
       ${addr}`;
   }
   if (t === 'signal') {
@@ -151,17 +339,54 @@ function getElementSVG(el) {
           <text x="0" y="4" text-anchor="middle" font-size="9" fill="#374151">${t}</text>`;
 }
 
-// ── Canvas Klick ──────────────────────────────
+// ── Navigation: Zoom (Rad) + Pan (Leertaste/Mitteltaste/Pan-Werkzeug) ──
+
+function onWheel(e) {
+  e.preventDefault();
+  const factor = e.deltaY < 0 ? 1.15 : 1/1.15;
+  zoomAt(e.clientX, e.clientY, factor);
+}
+
+function onPointerDown(e) {
+  const wantPan = (e.button === 1) || spaceDown || currentTool === 'pan';
+  if (wantPan && e.button !== 2) {
+    isPanning = true;
+    movedWhilePanning = false;
+    dragStart = { x: e.clientX, y: e.clientY };
+    wrapEl().classList.add('panning');
+    e.preventDefault();
+  }
+}
+
+function onPointerMove(e) {
+  if (!isPanning) return;
+  const dx = e.clientX - dragStart.x;
+  const dy = e.clientY - dragStart.y;
+  if (Math.abs(dx) + Math.abs(dy) > 2) movedWhilePanning = true;
+  const s = svgEl();
+  view.x -= dx * (view.w / (s.clientWidth  || 1));
+  view.y -= dy * (view.h / (s.clientHeight || 1));
+  dragStart = { x: e.clientX, y: e.clientY };
+  applyView();
+}
+
+function onPointerUp() {
+  if (isPanning) {
+    isPanning = false;
+    wrapEl().classList.remove('panning');
+  }
+}
+
+// ── Klick auf Leinwand → Element setzen ───────
 
 function onCanvasClick(e) {
-  if (e.target.closest('[data-id]')) return;
+  if (currentTool === 'pan' || spaceDown) return;
+  if (movedWhilePanning) { movedWhilePanning = false; return; }
+  if (e.target.closest('[data-id]')) return;   // Element angeklickt → Selektion
   selectElement(null);
-  const svg = document.getElementById('track-canvas');
-  const pt = svg.createSVGPoint();
-  pt.x = e.clientX; pt.y = e.clientY;
-  const svgPt = pt.matrixTransform(svg.getScreenCTM().inverse());
-  const x = Math.floor(svgPt.x / GRID) * GRID;
-  const y = Math.floor(svgPt.y / GRID) * GRID;
+  const w = screenToWorld(e.clientX, e.clientY);
+  const x = Math.floor(w.x / GRID) * GRID;
+  const y = Math.floor(w.y / GRID) * GRID;
   placeElement(currentTool, x, y);
 }
 
@@ -185,6 +410,7 @@ async function placeElement(type, x, y) {
   const el = await res.json();
   elements.push(el);
   renderAll();
+  updateHint();
   selectElement(el.id);
 }
 
@@ -312,13 +538,13 @@ async function deleteSelected() {
   await fetch(`/api/track/${selectedId}`, {method:'DELETE'});
   elements = elements.filter(e => e.id !== selectedId);
   selectedId = null;
-  renderAll(); showProps(null);
+  renderAll(); showProps(null); updateHint();
 }
 
 async function clearTrack() {
   if (!confirm('Gesamten Gleisplan löschen?')) return;
   await fetch('/api/track/', {method:'DELETE'});
-  elements = []; renderAll();
+  elements = []; renderAll(); showProps(null); updateHint();
 }
 
 async function controlTurnout(address, thrown) {
@@ -330,16 +556,35 @@ async function controlTurnout(address, thrown) {
 
 function selectTool(type, btn) {
   currentTool = type;
-  document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tool-btn[data-type]').forEach(b => b.classList.remove('active'));
   if (btn) btn.classList.add('active');
+  wrapEl().classList.toggle('pan-mode', type === 'pan');
 }
 
+// ── Tastatur ──────────────────────────────────
+
 document.addEventListener('keydown', e => {
+  if (e.code === 'Space' && e.target.tagName !== 'INPUT') {
+    spaceDown = true;
+    wrapEl().classList.add('pan-mode');
+    e.preventDefault();
+    return;
+  }
   if (e.target.tagName === 'INPUT') return;
   if (e.key === 'r' || e.key === 'R') rotateSelected();
+  if (e.key === 'f' || e.key === 'F') fitToContent();
   if (e.key === 'Delete') deleteSelected();
   if (e.key === 'Escape') selectElement(null);
 });
+
+document.addEventListener('keyup', e => {
+  if (e.code === 'Space') {
+    spaceDown = false;
+    if (currentTool !== 'pan') wrapEl().classList.remove('pan-mode');
+  }
+});
+
+// ── WebSocket Updates ─────────────────────────
 
 window.onStateUpdate = function(state) {
   if (state.type === 'turnout_info') {
@@ -349,6 +594,20 @@ window.onStateUpdate = function(state) {
     if (el) el.innerHTML = `Status: <strong>${state.thrown ? 'Abbiegen' : 'Gerade'}</strong>`;
   }
 };
+
+// ── Init ──────────────────────────────────────
+
+(function initCanvas() {
+  const s = svgEl();
+  s.addEventListener('wheel', onWheel, { passive: false });
+  s.addEventListener('mousedown', onPointerDown);
+  window.addEventListener('mousemove', onPointerMove);
+  window.addEventListener('mouseup', onPointerUp);
+  s.addEventListener('click', onCanvasClick);
+  s.addEventListener('contextmenu', onCanvasRightClick);
+  window.addEventListener('resize', () => applyView());
+  applyView();
+})();
 
 loadTrack();
 </script>
