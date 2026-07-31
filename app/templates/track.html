@@ -297,7 +297,7 @@ function getElementSVG(el) {
   }
   if (t === 'curve') {
     return `
-      <rect x="${-hs}" y="${-hs}" width="${GRID}" height="${GRID}" rx="3" fill="#e8e0fc" fill-opacity="0.4"/>
+      <rect x="${-hs}" y="${-hs}" width="${GRID}" height="${GRID}" fill="transparent" pointer-events="all"/>
       <path d="M ${-hs} 0 Q 0 0 0 ${-hs}" fill="none" stroke="#3b1fa8" stroke-width="5" stroke-linecap="butt"/>
       <path d="M ${-hs} 0 Q 0 0 0 ${-hs}" fill="none" stroke="#c4b0fa" stroke-width="2" stroke-linecap="butt"/>`;
   }
@@ -311,7 +311,7 @@ function getElementSVG(el) {
       : `<rect x="-14" y="${hs-18}" width="28" height="14" rx="3" fill="#ef4444" fill-opacity="0.8"/>
          <text x="0" y="${hs-8}" text-anchor="middle" font-size="8" font-weight="700" fill="#fff">kein Adr.</text>`;
     return `
-      <rect x="${-hs}" y="${-hs}" width="${GRID}" height="${GRID}" rx="3" fill="#fef9c3" fill-opacity="0.5"/>
+      <rect x="${-hs}" y="${-hs}" width="${GRID}" height="${GRID}" rx="4" fill="#d97706" fill-opacity="0.10" stroke="#d97706" stroke-opacity="0.30" stroke-width="1" pointer-events="all"/>
       <line x1="${-hs}" y1="0" x2="${hs}" y2="0" stroke="${straightColor}" stroke-width="5" stroke-linecap="butt"/>
       <line x1="${-hs}" y1="0" x2="4" y2="${-hs+4}" stroke="${thrownColor}" stroke-width="4" stroke-linecap="round"/>
       ${addr}`;
