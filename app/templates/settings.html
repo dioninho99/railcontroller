@@ -3,39 +3,43 @@
 {% block nav_settings %}active{% endblock %}
 
 {% block content %}
-<div class="page-header">
-  <h1>Einstellungen</h1>
-</div>
+<style>
+  .conn-hero { display: flex; align-items: center; gap: .9rem; padding: .1rem 0 .9rem; }
+  .conn-dot {
+    width: 12px; height: 12px; border-radius: 50%;
+    background: var(--text-muted); flex-shrink: 0;
+    box-shadow: 0 0 0 4px var(--bg-subtle); transition: background .2s, box-shadow .2s;
+  }
+  .conn-dot.on  { background: var(--accent); box-shadow: 0 0 0 4px var(--accent-light); }
+  .conn-dot.off { background: var(--danger); box-shadow: 0 0 0 4px var(--danger-light); }
+  .conn-text { font-size: 1.05rem; font-weight: 650; }
+  .conn-sub  { font-size: 12px; color: var(--text-muted); }
+
+  .turnout-manage {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: .5rem 0; border-bottom: 1px solid var(--border);
+  }
+  .turnout-manage:last-child { border-bottom: none; }
+  .turnout-manage .t-name { font-weight: 500; }
+  .turnout-manage .t-addr { color: var(--text-muted); font-size: 12px; margin-left: .35rem; }
+</style>
+
+<div class="page-header"><h1>Einstellungen</h1></div>
 
 <div class="settings-grid">
 
   <div class="card">
     <div class="card-header">Z21 Verbindung</div>
     <div class="card-body">
-      <div class="status-row">
-        <span class="label">Status</span>
-        <span id="set-z21-status" class="status-badge status-offline">–</span>
-      </div>
-      <div class="status-row">
-        <span class="label">Temperatur</span>
-        <span id="set-temp">–</span>
-      </div>
-      <div class="status-row">
-        <span class="label">Versorgungsspannung</span>
-        <span id="set-voltage">–</span>
-      </div>
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="card-header">Z21-Datei importieren</div>
-      <div class="card-body">
-        <p class="muted">.z21-Anlagendatei aus der Z21-App. Loks werden übernommen, vorhandene Adressen übersprungen.</p>
-        <div class="add-form">
-          <input type="file" id="z21-file" accept=".z21,.zip,.sqlite" class="input-grow">
-          <button class="btn btn-primary btn-sm" onclick="importZ21()">Importieren</button>
+      <div class="conn-hero">
+        <span class="conn-dot" id="conn-dot"></span>
+        <div>
+          <div class="conn-text" id="set-z21-status">–</div>
+          <div class="conn-sub">Z21 LAN · UDP 21105</div>
         </div>
-      <div id="import-result" class="muted" style="margin-top:.6rem"></div>
+      </div>
+      <div class="status-row"><span class="label">Temperatur</span><span id="set-temp">–</span></div>
+      <div class="status-row"><span class="label">Versorgungsspannung</span><span id="set-voltage">–</span></div>
     </div>
   </div>
 
@@ -66,11 +70,14 @@
 
 {% block scripts %}
 <script>
+function applyConn(online) {
+  document.getElementById('set-z21-status').textContent = online ? 'Online' : 'Offline';
+  document.getElementById('conn-dot').className = 'conn-dot ' + (online ? 'on' : 'off');
+}
+
 async function loadSettings() {
   const sys = await fetch('/api/system').then(r => r.json());
-  const z21El = document.getElementById('set-z21-status');
-  z21El.textContent = sys.z21_connected ? 'Online' : 'Offline';
-  z21El.className = 'status-badge ' + (sys.z21_connected ? 'status-online' : 'status-offline');
+  applyConn(!!sys.z21_connected);
   document.getElementById('set-temp').textContent = sys.temperature_c ? sys.temperature_c.toFixed(1) + ' °C' : '–';
   document.getElementById('set-voltage').textContent = sys.supply_voltage_mv ? (sys.supply_voltage_mv/1000).toFixed(1) + ' V' : '–';
 
@@ -80,11 +87,10 @@ async function loadSettings() {
     div.innerHTML = '<p class="muted">Keine Weichen konfiguriert.</p>';
   } else {
     div.innerHTML = turnouts.map(t => `
-      <div class="status-row">
-        <span>${t.name} <span class="muted">(Adr. ${t.address})</span></span>
+      <div class="turnout-manage">
+        <span><span class="t-name">${t.name}</span><span class="t-addr">Adr. ${t.address}</span></span>
         <button class="btn btn-sm btn-danger" onclick="deleteTurnout(${t.address})">Entfernen</button>
-      </div>
-    `).join('');
+      </div>`).join('');
   }
 }
 
@@ -107,27 +113,6 @@ async function addTurnout() {
   }
 }
 
-async function importZ21() {
-  const inp = document.getElementById('z21-file');
-  if (!inp.files.length) { alert('Bitte Datei wählen'); return; }
-  const fd = new FormData();
-  fd.append('file', inp.files[0]);
-  const out = document.getElementById('import-result');
-  out.textContent = 'Importiere...';
-  try {
-    const r = await fetch('/api/import/z21', {method: 'POST', body: fd});
-    const data = await r.json();
-    if (!r.ok) { out.textContent = 'Fehler: ' + (data.detail || 'unbekannt'); return; }
-    out.innerHTML =
-      `${data.locos_imported} Loks, ${data.turnouts_imported} Weichen, ` +
-      `${data.routes_imported} Fahrstraßen, ${data.track_imported} Gleisplan-Elemente ` +
-      `(Seite „${data.track_page}") importiert.` +
-      (data.locos_skipped ? `<br>${data.locos_skipped} Loks übersprungen (Adresse doppelt/vorhanden).` : '') +
-      (data.route_steps_dropped ? `<br>${data.route_steps_dropped} Fahrstraßen-Schritte übersprungen (3-Wege/Signal).` : '');
-    loadSettings();
-  } catch (e) { out.textContent = 'Fehler: ' + e; }
-}
-
 async function deleteTurnout(address) {
   if (!confirm(`Weiche ${address} wirklich entfernen?`)) return;
   await fetch(`/api/turnouts/${address}`, {method: 'DELETE'});
@@ -136,11 +121,7 @@ async function deleteTurnout(address) {
 
 window.onStateUpdate = function(state) {
   if (state.type === 'system' || state.type === 'full_state') {
-    if (state.z21_connected !== undefined) {
-      const el = document.getElementById('set-z21-status');
-      el.textContent = state.z21_connected ? 'Online' : 'Offline';
-      el.className = 'status-badge ' + (state.z21_connected ? 'status-online' : 'status-offline');
-    }
+    if (state.z21_connected !== undefined) applyConn(state.z21_connected);
     if (state.temperature_c) document.getElementById('set-temp').textContent = state.temperature_c.toFixed(1) + ' °C';
     if (state.supply_voltage_mv) document.getElementById('set-voltage').textContent = (state.supply_voltage_mv/1000).toFixed(1) + ' V';
   }
