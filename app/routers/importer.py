@@ -68,7 +68,7 @@ def _reconstruct(cell: dict, occ: set):
     Aus den Beispieldaten dekodiert:
       type 1 = Rechtsweiche (Abzweig NE), type 2 = Linksweiche (Abzweig NW),
       type 3 = Kreuzungsweiche (N-S + NW-SE), type 45 = Kreuzung (N-S + E-W),
-      type 30 = Prellbock, type 0/39/31/38/24/37/14 = Gerade.
+      type 30 = Prellbock, type 39 = Tunnel (breites Band), type 0/31/38/24/37/14 = Gerade.
     """
     t = cell["type"]
     a = int(cell["angle"]) % 360
@@ -79,6 +79,7 @@ def _reconstruct(cell: dict, occ: set):
     if t == 3:            return "slip", a
     if t == 45:           return "cross", a
     if t == 30:           return "bumper", a
+    if t == 39:           return "tunnel", (a + 90) % 180   # breites Band = Tunnel
     if t in (10, 12, 23): return "signal", a
 
     if t == 28:  # Kurve
@@ -193,10 +194,17 @@ def _parse(db_bytes: bytes) -> dict:
                 cells = [dict(r) for r in con.execute(
                     "SELECT x,y,angle,type,address1 FROM control_station_controls WHERE page_id=?", (pid,))]
                 occ = {(c["x"], c["y"]) for c in cells}
+                tunnel_pos = {(c["x"], c["y"]) for c in cells if c["type"] == 39}
                 if cells:
                     minx = min(c["x"] for c in cells); miny = min(c["y"] for c in cells)
                     for c in cells:
                         et, rot = _reconstruct(c, occ)
+                        # Kurven, die an einen Tunnel grenzen, ebenfalls als Tunnel zeichnen
+                        if et == "curve":
+                            cx, cy = c["x"], c["y"]
+                            if any((cx + dx, cy + dy) in tunnel_pos
+                                   for dx in (-1, 0, 1) for dy in (-1, 0, 1) if (dx, dy) != (0, 0)):
+                                et = "tunnel_curve"
                         track.append({
                             "element_type": et,
                             "x": (c["x"] - minx) * 40,

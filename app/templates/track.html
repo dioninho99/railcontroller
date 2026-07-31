@@ -301,6 +301,19 @@ function getElementSVG(el) {
   const diag = (el.rotation % 90) !== 0;
   const L = diag ? hs * Math.SQRT2 : hs;
   const dl = hs * Math.SQRT2;    // feste Diagonallänge (für Kreuzungsweichen-Schräge)
+  const TUNNEL = '#4e4a70';       // Tunnel-Band (breiter, grau)
+
+  // Tunnel: breites Band mit Gleis darin (type 39 der Z21)
+  if (t === 'tunnel') {
+    return `${hit}
+      <line x1="${-L}" y1="0" x2="${L}" y2="0" stroke="${TUNNEL}" stroke-width="13" stroke-linecap="round"/>
+      <line x1="${-L}" y1="0" x2="${L}" y2="0" stroke="${TRACK}" stroke-width="${W}" stroke-linecap="round"/>`;
+  }
+  if (t === 'tunnel_curve') {
+    return `${hit}
+      <path d="M ${-hs} 0 Q 0 0 0 ${-hs}" fill="none" stroke="${TUNNEL}" stroke-width="13" stroke-linecap="round"/>
+      <path d="M ${-hs} 0 Q 0 0 0 ${-hs}" fill="none" stroke="${TRACK}" stroke-width="${W}" stroke-linecap="round"/>`;
+  }
 
   if (t === 'straight') {
     return `${hit}<line x1="${-L}" y1="0" x2="${L}" y2="0" stroke="${TRACK}" stroke-width="${W}" stroke-linecap="round"/>`;
@@ -459,7 +472,8 @@ function showProps(id) {
     return;
   }
 
-  const typeLabels = {straight:'Gerades Gleis', curve:'Kurve', turnout:'Weiche',
+  const typeLabels = {straight:'Gerades Gleis', curve:'Kurve', tunnel:'Tunnel',
+    tunnel_curve:'Tunnelkurve', turnout:'Weiche',
     turnout_r:'Weiche (rechts)', turnout_l:'Weiche (links)', slip:'Kreuzungsweiche',
     cross:'Kreuzung', bumper:'Prellbock', signal:'Signal', block:'Block',
     label:'Beschriftung', detector:'Belegtmelder'};
