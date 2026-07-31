@@ -336,6 +336,12 @@ function getElementSVG(el) {
       : `<circle cx="${hs-4}" cy="${-hs+4}" r="2.5" fill="#ef4444"/>`;
     return `${hit}${branch}${through}${badge}`;
   }
+  // Belegtmelder: dezentes grünes Overlay auf dem Gleisabschnitt
+  if (t === 'detector') {
+    return `${hit}
+      <rect x="${-hs}" y="-6" width="${GRID}" height="12" rx="3" fill="#22c55e" fill-opacity="0.16"/>
+      <rect x="${-hs}" y="-6" width="${GRID}" height="12" rx="3" fill="none" stroke="#22c55e" stroke-opacity="0.4" stroke-width="1"/>`;
+  }
   if (t === 'signal') {
     return `${hit}
       <line x1="0" y1="${hs}" x2="0" y2="2" stroke="${TRACK_DIM}" stroke-width="2"/>
@@ -349,7 +355,15 @@ function getElementSVG(el) {
       <text x="0" y="4" text-anchor="middle" font-size="9" font-weight="700" fill="#c4b5f0">${lbl}</text>`;
   }
   if (t === 'label') {
-    return `<text x="0" y="4" text-anchor="middle" font-size="12" font-weight="600" fill="#d8d2ee" paint-order="stroke" stroke="#12101c" stroke-width="3">${el.label || 'Text'}</text>`;
+    const props = el.properties || {};
+    const fs = Math.max(8, Math.min(15, (props.font_size || 24) * 0.42));
+    const lines = String(el.label || 'Text').split('\n');
+    const lh = fs * 1.15;
+    const y0 = -(lines.length - 1) * lh / 2 + fs * 0.34;
+    const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const tspans = lines.map((ln, i) =>
+      `<tspan x="0" y="${(y0 + i * lh).toFixed(1)}">${esc(ln)}</tspan>`).join('');
+    return `<text text-anchor="middle" font-size="${fs.toFixed(1)}" font-weight="600" fill="#d8d2ee" paint-order="stroke" stroke="#12101c" stroke-width="3">${tspans}</text>`;
   }
   return `${hit}<line x1="${-L}" y1="0" x2="${L}" y2="0" stroke="${TRACK_DIM}" stroke-width="${W}" stroke-linecap="round" stroke-dasharray="3 3"/>`;
 }
@@ -447,7 +461,8 @@ function showProps(id) {
 
   const typeLabels = {straight:'Gerades Gleis', curve:'Kurve', turnout:'Weiche',
     turnout_r:'Weiche (rechts)', turnout_l:'Weiche (links)', slip:'Kreuzungsweiche',
-    cross:'Kreuzung', bumper:'Prellbock', signal:'Signal', block:'Block', label:'Beschriftung'};
+    cross:'Kreuzung', bumper:'Prellbock', signal:'Signal', block:'Block',
+    label:'Beschriftung', detector:'Belegtmelder'};
   const isTurnout = ['turnout','turnout_r','turnout_l','slip'].includes(el.element_type);
 
   panel.innerHTML = `

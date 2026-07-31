@@ -181,7 +181,7 @@ def _parse(db_bytes: bytes) -> dict:
                                    "steps": steps, "dropped": dropped})
 
         # Gleisplan: Seite mit den meisten Elementen (type=0 zählt jetzt mit)
-        track, track_page = [], None
+        track, notes, detectors, track_page = [], [], [], None
         if "control_station_controls" in tables:
             page = con.execute(
                 "SELECT page_id FROM control_station_controls "
@@ -204,12 +204,39 @@ def _parse(db_bytes: bytes) -> dict:
                             "rotation": rot,
                             "ref_address": c["address1"] or None,
                         })
+
+                    # Beschriftungen (Notizen) – gleiches Raster wie die Gleise
+                    if "control_station_notes" in tables:
+                        for r in con.execute(
+                            "SELECT x,y,text,font_size,angle FROM control_station_notes WHERE page_id=?", (pid,)):
+                            txt = (r["text"] or "").strip()
+                            if not txt:
+                                continue
+                            notes.append({
+                                "x": (r["x"] - minx) * 40,
+                                "y": (r["y"] - miny) * 40,
+                                "rotation": int(r["angle"] or 0) % 360,
+                                "label": txt,
+                                "font_size": int(r["font_size"] or 24),
+                            })
+
+                    # Belegtmelder (report_address = Melder-Adresse; relevant fürs Tracking)
+                    if "control_station_response_modules" in tables:
+                        for r in con.execute(
+                            "SELECT x,y,angle,report_address FROM control_station_response_modules WHERE page_id=?", (pid,)):
+                            detectors.append({
+                                "x": (r["x"] - minx) * 40,
+                                "y": (r["y"] - miny) * 40,
+                                "rotation": int(r["angle"] or 0) % 360,
+                                "ref_address": r["report_address"] or None,
+                            })
         con.close()
     finally:
         os.unlink(path)
 
     return {"locos": locos, "turnouts": turnouts, "routes": routes,
-            "track": track, "track_page": track_page}
+            "track": track, "notes": notes, "detectors": detectors,
+            "track_page": track_page}
 
 
 @router.post("/z21")
@@ -219,6 +246,7 @@ async def import_z21(request: Request, file: UploadFile = File(...)):
 
     loco_imported = loco_skipped = turnout_imported = 0
     route_imported = dropped_steps = track_imported = 0
+    notes_imported = detectors_imported = 0
 
     with Session(request.app.state.engine) as session:
         # Loks (vorhandene Adressen überspringen)
@@ -245,10 +273,20 @@ async def import_z21(request: Request, file: UploadFile = File(...)):
             r = Route(name=name); r.set_steps(rt["steps"])
             session.add(r); route_imported += 1
 
-        # Gleisplan (ersetzt vorhandenen Plan komplett)
+        # Gleisplan (ersetzt vorhandenen Plan komplett).
+        # Reihenfolge = Zeichenreihenfolge: erst Belegtmelder (unten), dann
+        # Gleise, dann Beschriftungen (oben).
         if parsed["track"]:
             for el in session.exec(select(TrackElement)).all():
                 session.delete(el)
+
+            for d in parsed["detectors"]:
+                session.add(TrackElement(
+                    element_type="detector", x=d["x"], y=d["y"],
+                    rotation=d["rotation"], ref_address=d["ref_address"],
+                    label="", properties="{}"))
+                detectors_imported += 1
+
             for e in parsed["track"]:
                 session.add(TrackElement(
                     element_type=e["element_type"], x=e["x"], y=e["y"],
@@ -256,10 +294,20 @@ async def import_z21(request: Request, file: UploadFile = File(...)):
                     label="", properties="{}"))
                 track_imported += 1
 
+            for n in parsed["notes"]:
+                session.add(TrackElement(
+                    element_type="label", x=n["x"], y=n["y"],
+                    rotation=n["rotation"], ref_address=None,
+                    label=n["label"],
+                    properties=json.dumps({"font_size": n["font_size"]})))
+                notes_imported += 1
+
         session.commit()
 
     return {"ok": True,
             "locos_imported": loco_imported, "locos_skipped": loco_skipped,
             "turnouts_imported": turnout_imported,
             "routes_imported": route_imported, "route_steps_dropped": dropped_steps,
-            "track_imported": track_imported, "track_page": parsed["track_page"]}
+            "track_imported": track_imported,
+            "notes_imported": notes_imported, "detectors_imported": detectors_imported,
+            "track_page": parsed["track_page"]}
