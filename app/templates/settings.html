@@ -22,6 +22,24 @@
   .turnout-manage:last-child { border-bottom: none; }
   .turnout-manage .t-name { font-weight: 500; }
   .turnout-manage .t-addr { color: var(--text-muted); font-size: 12px; margin-left: .35rem; }
+
+  /* Z21-Import */
+  .import-drop {
+    display: flex; flex-direction: column; gap: .6rem;
+    padding: 1rem; border: 1.5px dashed var(--border-strong);
+    border-radius: var(--radius-sm); background: var(--bg-subtle);
+    text-align: center;
+  }
+  .import-drop .hint { font-size: 12px; color: var(--text-muted); }
+  .import-file { font-size: 13px; }
+  .import-file::file-selector-button {
+    margin-right: .6rem; padding: .35rem .7rem;
+    border: 1px solid var(--border-strong); border-radius: 6px;
+    background: var(--bg-card); color: var(--text); cursor: pointer; font-size: 13px;
+  }
+  .import-result { font-size: 13px; margin-top: .75rem; min-height: 1em; line-height: 1.5; }
+  .import-result.ok  { color: var(--accent-dark); }
+  .import-result.err { color: var(--danger); }
 </style>
 
 <div class="page-header"><h1>Einstellungen</h1></div>
@@ -52,6 +70,20 @@
         <input type="text"   id="new-turnout-name" placeholder="Name" class="input-grow">
         <button class="btn btn-primary btn-sm" onclick="addTurnout()">+ Weiche</button>
       </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">Z21-Datei importieren</div>
+    <div class="card-body">
+      <div class="import-drop">
+        <input type="file" id="import-file" class="import-file" accept=".z21,.sqlite">
+        <span class="hint">Aus der Z21-App exportierte <strong>.z21</strong>-Datei. Loks, Weichen und Fahrstraßen werden ergänzt, der Gleisplan wird ersetzt.</span>
+      </div>
+      <div class="modal-actions" style="margin-top:1rem">
+        <button class="btn btn-primary" id="import-btn" onclick="importZ21()">Importieren</button>
+      </div>
+      <div class="import-result" id="import-result"></div>
     </div>
   </div>
 
@@ -117,6 +149,40 @@ async function deleteTurnout(address) {
   if (!confirm(`Weiche ${address} wirklich entfernen?`)) return;
   await fetch(`/api/turnouts/${address}`, {method: 'DELETE'});
   loadSettings();
+}
+
+async function importZ21() {
+  const input = document.getElementById('import-file');
+  const out = document.getElementById('import-result');
+  const btn = document.getElementById('import-btn');
+  out.className = 'import-result';
+  if (!input.files || input.files.length === 0) {
+    out.className = 'import-result err';
+    out.textContent = 'Bitte zuerst eine .z21-Datei auswählen.';
+    return;
+  }
+  const fd = new FormData();
+  fd.append('file', input.files[0]);
+  btn.disabled = true; btn.textContent = 'Importiere…';
+  out.textContent = '';
+  try {
+    const res = await fetch('/api/import/z21', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Import fehlgeschlagen');
+    out.className = 'import-result ok';
+    out.innerHTML =
+      `${data.locos_imported} Loks, ${data.turnouts_imported} Weichen, ` +
+      `${data.routes_imported} Fahrstraßen, ${data.track_imported} Gleisplan-Elemente ` +
+      `(Seite „${data.track_page}") importiert.` +
+      (data.locos_skipped ? `<br>${data.locos_skipped} Loks übersprungen (Adresse doppelt/vorhanden).` : '') +
+      (data.route_steps_dropped ? `<br>${data.route_steps_dropped} Fahrstraßen-Schritte übersprungen (3-Wege/Signal).` : '');
+    loadSettings();
+  } catch (e) {
+    out.className = 'import-result err';
+    out.textContent = 'Fehler: ' + e.message;
+  } finally {
+    btn.disabled = false; btn.textContent = 'Importieren';
+  }
 }
 
 window.onStateUpdate = function(state) {
