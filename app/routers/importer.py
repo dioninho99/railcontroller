@@ -4,6 +4,13 @@ Format: ZIP mit export/<UUID>/Loco.sqlite. Importiert Loks, Weichen,
 Fahrstraßen und den Gleisplan (Seite mit den meisten Elementen).
 Mehrfach-Import ist sicher: Loks/Weichen/Routen werden übersprungen,
 der Gleisplan wird ersetzt.
+
+Gleisplan-Rekonstruktion (korrigiert):
+  * type=0 sind GERADEN (keine Leerzellen) – werden jetzt importiert.
+  * Z21-Winkel 90/270 = waagrecht, 0/180 = senkrecht. In track.html ist
+    eine Gerade bei rotation 0 waagrecht -> rotation = (angle+90) % 180.
+  * Kurven (type 28): Drehung primär aus den belegten Nachbarn abgeleitet,
+    ersatzweise aus dem Winkel.
 """
 
 from fastapi import APIRouter, UploadFile, File, Request, HTTPException
@@ -24,12 +31,47 @@ IMG_LABELS = {
 }
 
 
-def _track_type(t: int) -> str:
-    """Z21 control-type -> track.html element_type (best effort)."""
-    if t in (1, 2, 3):   return "turnout"
-    if t == 28:          return "curve"
+# ── Gleisplan: Z21 control-type/angle -> track.html element_type/rotation ──
+
+# track.html-Kurve bei rotation r verbindet: 0={W,N} 90={N,E} 180={E,S} 270={S,W}
+_PAIR2ROT = {frozenset("WN"): 0, frozenset("NE"): 90,
+             frozenset("ES"): 180, frozenset("SW"): 270}
+
+# Ersatz-Zuordnung Kurvenwinkel -> Drehung, wenn Nachbarschaft nicht eindeutig
+# (aus den eindeutigen Zellen der Beispielanlage abgeleitet)
+_CURVE_ANGLE_FALLBACK = {0: 0, 45: 270, 90: 90, 135: 0,
+                         180: 180, 225: 0, 270: 270, 315: 180}
+
+
+def _elem_type(t: int) -> str:
+    """Z21 control-type -> track.html element_type."""
+    if t in (1, 2, 3):    return "turnout"
+    if t == 28:           return "curve"
     if t in (10, 12, 23): return "signal"
-    return "straight"    # Geraden + unbekannte Gleisstücke
+    return "straight"     # type 0, 39 und übrige Gleisstücke
+
+
+def _rotation(cell: dict, occ: set) -> int:
+    """track.html-Rotation aus Z21-Winkel und ggf. Nachbarschaft."""
+    t = cell["type"]
+    a = int(cell["angle"]) % 360
+    et = _elem_type(t)
+
+    if et == "straight":
+        # 90/270 (waagrecht) -> 0 ; 0/180 (senkrecht) -> 90 ; Diagonalen -> 45/135
+        return (a + 90) % 180
+
+    if et == "curve":
+        x, y = cell["x"], cell["y"]
+        nb = {d for d, (dx, dy) in (("N", (0, -1)), ("E", (1, 0)),
+                                    ("S", (0, 1)), ("W", (-1, 0)))
+              if (x + dx, y + dy) in occ}
+        if len(nb) == 2 and frozenset(nb) in _PAIR2ROT:
+            return _PAIR2ROT[frozenset(nb)]
+        return _CURVE_ANGLE_FALLBACK.get(a, 0)
+
+    # turnout / signal: durchgehende Route wie bei Geraden ausrichten
+    return (a + 90) % 360
 
 
 def _extract_sqlite(raw: bytes) -> bytes:
@@ -105,27 +147,27 @@ def _parse(db_bytes: bytes) -> dict:
                     routes.append({"name": route["name"] or "Fahrstraße",
                                    "steps": steps, "dropped": dropped})
 
-        # Gleisplan: Seite mit den meisten echten Elementen
+        # Gleisplan: Seite mit den meisten Elementen (type=0 zählt jetzt mit)
         track, track_page = [], None
         if "control_station_controls" in tables:
             page = con.execute(
-                "SELECT page_id FROM control_station_controls WHERE type<>0 "
+                "SELECT page_id FROM control_station_controls "
                 "GROUP BY page_id ORDER BY COUNT(*) DESC LIMIT 1").fetchone()
             if page:
                 pid = page["page_id"]
                 pn = con.execute("SELECT name FROM control_station_pages WHERE id=?", (pid,)).fetchone()
                 track_page = pn["name"] if pn else str(pid)
                 cells = [dict(r) for r in con.execute(
-                    "SELECT x,y,angle,type,address1 FROM control_station_controls "
-                    "WHERE page_id=? AND type<>0", (pid,))]
+                    "SELECT x,y,angle,type,address1 FROM control_station_controls WHERE page_id=?", (pid,))]
+                occ = {(c["x"], c["y"]) for c in cells}
                 if cells:
                     minx = min(c["x"] for c in cells); miny = min(c["y"] for c in cells)
                     for c in cells:
                         track.append({
-                            "element_type": _track_type(c["type"]),
+                            "element_type": _elem_type(c["type"]),
                             "x": (c["x"] - minx) * 40,
                             "y": (c["y"] - miny) * 40,
-                            "rotation": int(c["angle"]) % 360,
+                            "rotation": _rotation(c, occ),
                             "ref_address": c["address1"] or None,
                         })
         con.close()
