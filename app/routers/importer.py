@@ -109,6 +109,47 @@ def _reconstruct(cell: dict, occ: set):
     return "straight", (a + 90) % 180
 
 
+# ── Kreuzungen (type 45): echte Kreuzungsachsen bestimmen ──────────
+# Brücken sind Grad-getrennte Überwerfungen (Gerade × Diagonale), keine reinen +.
+
+_D8 = {'N': (0, -1), 'NE': (1, -1), 'E': (1, 0), 'SE': (1, 1),
+       'S': (0, 1), 'SW': (-1, 1), 'W': (-1, 0), 'NW': (-1, -1)}
+# Achse -> (Ende1, Ende2, Name); Name = Ausrichtung einer geraden Nachbarzelle
+_AX = {0: ('E', 'W', 'waag'), 90: ('N', 'S', 'senk'),
+       45: ('NW', 'SE', '\\'), 135: ('NE', 'SW', '/')}
+
+
+def _orient(cell: dict) -> str:
+    t = cell["type"]; a = int(cell["angle"]) % 360
+    if t in (0, 39, 38, 31): return {0: 'waag', 90: 'senk', 45: '\\', 135: '/'}[(a + 90) % 180]
+    if t in (28, 37): return 'kurve'
+    if t in (1, 2, 3): return 'weiche'
+    if t == 45:       return 'kreuz'
+    return 'x'
+
+
+def _cross_axes(cell: dict, pos: dict) -> list:
+    """Die zwei tatsächlich kreuzenden Achsen einer Kreuzung aus der Nachbarschaft."""
+    x, y = cell["x"], cell["y"]
+
+    def endscore(d, name, diag):
+        c = pos.get((x + _D8[d][0], y + _D8[d][1]))
+        if not c: return 0
+        o = _orient(c)
+        if o == name:                    return 3   # kollineare Gerade
+        if o in ('kreuz', 'weiche'):     return 1
+        if diag and o == 'kurve':        return 2   # Kurve = Diagonalanschluss
+        return 0
+
+    scored = []
+    for orient, (p, q, name) in _AX.items():
+        diag = orient in (45, 135)
+        scored.append((endscore(p, name, diag) + endscore(q, name, diag), orient))
+    scored.sort(reverse=True)
+    axes = [o for s, o in scored if s >= 2][:2]
+    return axes or [0, 90]
+
+
 def _extract_sqlite(raw: bytes) -> bytes:
     if raw[:2] == b"PK":
         with zipfile.ZipFile(io.BytesIO(raw)) as z:
@@ -195,14 +236,20 @@ def _parse(db_bytes: bytes) -> dict:
                 cells = [dict(r) for r in con.execute(
                     "SELECT x,y,angle,type,address1 FROM control_station_controls WHERE page_id=?", (pid,))]
                 occ = {(c["x"], c["y"]) for c in cells}
+                pos = {(c["x"], c["y"]): c for c in cells}
                 tunnel_pos = {(c["x"], c["y"]) for c in cells if c["type"] in (39, 38, 37)}
                 if cells:
                     minx = min(c["x"] for c in cells); miny = min(c["y"] for c in cells)
                     for c in cells:
                         et, rot = _reconstruct(c, occ)
+                        props = {}
+                        # Kreuzung: echte Kreuzungsachsen aus der Nachbarschaft (absolut)
+                        if c["type"] == 45:
+                            et, rot = "cross", 0
+                            props["axes"] = _cross_axes(c, pos)
                         # Normale Kurve zur Tunnelkurve machen, wenn sie über einen
                         # ihrer beiden Anschlüsse an einen Tunnel grenzt.
-                        if et == "curve":
+                        elif et == "curve":
                             cx, cy = c["x"], c["y"]
                             for s in _SIDES.get(rot % 360, ()):
                                 dx, dy = _DIRV[s]
@@ -214,6 +261,7 @@ def _parse(db_bytes: bytes) -> dict:
                             "y": (c["y"] - miny) * 40,
                             "rotation": rot,
                             "ref_address": c["address1"] or None,
+                            "properties": props,
                         })
 
                     # Beschriftungen (Notizen) – gleiches Raster wie die Gleise
@@ -302,7 +350,7 @@ async def import_z21(request: Request, file: UploadFile = File(...)):
                 session.add(TrackElement(
                     element_type=e["element_type"], x=e["x"], y=e["y"],
                     rotation=e["rotation"], ref_address=e["ref_address"],
-                    label="", properties="{}"))
+                    label="", properties=json.dumps(e.get("properties", {}))))
                 track_imported += 1
 
             for n in parsed["notes"]:

@@ -362,11 +362,18 @@ function getElementSVG(el) {
       <path d="M -5 ${-hs+3} l 4 4 M -1 ${-hs+3} l -4 4" stroke="#ef4444" stroke-width="1.5"/>
       <path d="M 5 ${hs-3} l -4 -4 M 1 ${hs-3} l 4 -4" stroke="#ef4444" stroke-width="1.5"/>`;
   }
-  // Kreuzung (nicht schaltbar): zwei sich kreuzende Geraden
+  // Kreuzung: zeichnet die tatsächlichen Kreuzungsachsen (0=waag, 90=senk, 45=\, 135=/).
+  // Beim Import absolut gesetzt (rotation 0); manuell gesetzt Standard + und drehbar.
   if (t === 'cross') {
-    return `${hit}
-      <line x1="0" y1="${-L}" x2="0" y2="${L}" stroke="${TRACK}" stroke-width="${W}" stroke-linecap="round"/>
-      <line x1="${-L}" y1="0" x2="${L}" y2="0" stroke="${TRACK}" stroke-width="${W}" stroke-linecap="round"/>`;
+    const axes = (el.properties && el.properties.axes) || [0, 90];
+    const seg = o => {
+      if (o === 0)   return `<line x1="${-hs}" y1="0" x2="${hs}" y2="0" stroke="${TRACK}" stroke-width="${W}" stroke-linecap="round"/>`;
+      if (o === 90)  return `<line x1="0" y1="${-hs}" x2="0" y2="${hs}" stroke="${TRACK}" stroke-width="${W}" stroke-linecap="round"/>`;
+      if (o === 45)  return `<line x1="${-hs}" y1="${-hs}" x2="${hs}" y2="${hs}" stroke="${TRACK}" stroke-width="${W}" stroke-linecap="round"/>`;
+      if (o === 135) return `<line x1="${hs}" y1="${-hs}" x2="${-hs}" y2="${hs}" stroke="${TRACK}" stroke-width="${W}" stroke-linecap="round"/>`;
+      return '';
+    };
+    return `${hit}${axes.map(seg).join('')}`;
   }
   // Prellbock / Gleisende: Stummel + Endbalken
   if (t === 'bumper' || t === 'track_end') {
