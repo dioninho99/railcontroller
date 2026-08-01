@@ -178,6 +178,7 @@ let selectedId  = null;
 let elements    = [];
 let turnoutStates = {};
 let turnoutNames = {};
+let occupied = new Set();   // besetzte Belegtmelder-Adressen
 
 let view = { ...DEFAULT_VIEW };
 
@@ -445,8 +446,14 @@ function getElementSVG(el) {
       : '';
     return `${hit}${branch}${through}${badge}${nameSvg}`;
   }
-  // Belegtmelder: dezentes grünes Overlay auf dem Gleisabschnitt
+  // Belegtmelder: frei = dezent grün, besetzt = rot leuchtend
   if (t === 'detector') {
+    const busy = el.ref_address != null && occupied.has(el.ref_address);
+    if (busy) {
+      return `${hit}
+        <rect x="${-hs}" y="-8" width="${GRID}" height="16" rx="4" fill="#ef4444" fill-opacity="0.85"/>
+        <rect x="${-hs-1}" y="-9" width="${GRID+2}" height="18" rx="5" fill="none" stroke="#ff8080" stroke-width="1.5" stroke-opacity="0.9"/>`;
+    }
     return `${hit}
       <rect x="${-hs}" y="-6" width="${GRID}" height="12" rx="3" fill="#22c55e" fill-opacity="0.16"/>
       <rect x="${-hs}" y="-6" width="${GRID}" height="12" rx="3" fill="none" stroke="#22c55e" stroke-opacity="0.4" stroke-width="1"/>`;
@@ -651,7 +658,26 @@ function showProps(id) {
       <div class="prop-label" style="margin-bottom:.6rem">Überwerfung</div>
       <button class="btn btn-sm btn-ghost" style="width:100%" onclick="flipBridge(${el.id})">↕ Brücke tauschen (oben/unten)</button>
     </div>` : ''}
+
+    ${el.element_type === 'detector' ? `
+    <div class="prop-section" style="border-top:1px solid var(--border)">
+      <div class="prop-row">
+        <span class="prop-label">Melder-Adresse</span>
+        <div style="display:flex;gap:.4rem;align-items:center">
+          <input type="number" id="det-addr-${el.id}" value="${el.ref_address || ''}" min="1" placeholder="Adresse" style="width:90px">
+          <button class="btn btn-sm btn-primary" onclick="saveAddr(${el.id})">Speichern</button>
+        </div>
+      </div>
+      <div class="prop-turnout-state">Status: <strong>${el.ref_address && occupied.has(el.ref_address) ? 'besetzt' : 'frei'}</strong></div>
+      <button class="btn btn-sm btn-ghost" style="width:100%;margin-top:.5rem" onclick="toggleOccupancy(${el.ref_address}, ${el.id})">Belegt umschalten (Vorschau)</button>
+    </div>` : ''}
   `;
+}
+
+function toggleOccupancy(address, id) {
+  if (address == null) return;
+  if (occupied.has(address)) occupied.delete(address); else occupied.add(address);
+  renderAll(); showProps(id);
 }
 
 async function flipBridge(id) {
@@ -827,6 +853,17 @@ window.onStateUpdate = function(state) {
     renderAll();
     const el = document.getElementById(`turnout-state-${state.address}`);
     if (el) el.innerHTML = `Status: <strong>${state.thrown ? 'Abbiegen' : 'Gerade'}</strong>`;
+  }
+  // Belegtmeldung: einzelner Melder wechselt besetzt/frei
+  if (state.type === 'occupancy') {
+    if (state.occupied) occupied.add(state.address);
+    else occupied.delete(state.address);
+    renderAll();
+  }
+  // Voller Zustand kann eine Liste besetzter Melder-Adressen mitliefern
+  if ((state.type === 'system' || state.type === 'full_state') && Array.isArray(state.occupied)) {
+    occupied = new Set(state.occupied);
+    renderAll();
   }
 };
 
