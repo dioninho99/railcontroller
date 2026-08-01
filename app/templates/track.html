@@ -18,6 +18,17 @@
     }
   }
 
+  /* Katalog */
+  .cat-group-title { font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--text-muted); font-weight: 700; margin: 1rem 0 .5rem; }
+  .cat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(94px, 1fr)); gap: .5rem; }
+  .cat-item { display: flex; flex-direction: column; align-items: center; gap: .35rem;
+    padding: .5rem .3rem; border: 1px solid var(--border); border-radius: 8px;
+    background: var(--bg); cursor: pointer; transition: border-color .12s, background .12s; }
+  .cat-item:hover { border-color: var(--primary); background: var(--primary-light); }
+  .cat-preview { width: 46px; height: 46px; background: #0f0d1a; border-radius: 6px; }
+  .cat-item span { font-size: 11px; text-align: center; color: var(--text); line-height: 1.15; }
+
   .track-workspace {
     height: calc(100vh - 168px);
     min-height: 480px;
@@ -89,20 +100,30 @@
 <div class="page-header">
   <h1>Gleisplan</h1>
   <div class="track-toolbar">
-    <span class="toolbar-label">Element:</span>
-    <button class="tool-btn active" data-type="straight" onclick="selectTool('straight', this)" title="Gerades Gleis">━</button>
+    <button class="btn btn-sm btn-primary" onclick="openCatalog()">＋ Katalog</button>
+    <span class="toolbar-label">Element: <strong id="cur-tool-name">Gerade</strong></span>
+    <span class="toolbar-sep"></span>
+    <button class="tool-btn active" data-type="straight" onclick="selectTool('straight', this)" title="Gerade">━</button>
     <button class="tool-btn" data-type="curve" onclick="selectTool('curve', this)" title="Kurve">╭</button>
-    <button class="tool-btn" data-type="turnout" onclick="selectTool('turnout', this)" title="Weiche">⑂</button>
-    <button class="tool-btn" data-type="signal" onclick="selectTool('signal', this)" title="Signal">🚦</button>
-    <button class="tool-btn" data-type="block" onclick="selectTool('block', this)" title="Block">▭</button>
+    <button class="tool-btn" data-type="turnout_r" onclick="selectTool('turnout_r', this)" title="Weiche rechts">⑂</button>
     <button class="tool-btn" data-type="label" onclick="selectTool('label', this)" title="Beschriftung">T</button>
     <span class="toolbar-sep"></span>
     <button class="tool-btn" data-type="pan" onclick="selectTool('pan', this)" title="Verschieben (Leertaste halten + ziehen)">✋</button>
-    <span class="toolbar-sep"></span>
     <button class="tool-btn" onclick="rotateSelected()" title="Drehen (R)">↻</button>
     <button class="tool-btn" onclick="deleteSelected()" title="Löschen (Entf)">🗑</button>
     <span class="toolbar-sep"></span>
     <button class="btn btn-sm btn-ghost" onclick="clearTrack()">Leeren</button>
+  </div>
+</div>
+
+<!-- Katalog: alle Z21-Komponenten zum Setzen -->
+<div id="catalog-modal" class="modal hidden">
+  <div class="modal-box" style="width:660px;max-width:94vw">
+    <h2>Objekt auswählen</h2>
+    <div id="catalog-body" style="max-height:64vh;overflow-y:auto"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeCatalog()">Schließen</button>
+    </div>
   </div>
 </div>
 
@@ -321,29 +342,61 @@ function getElementSVG(el) {
   if (t === 'curve') {
     return `${hit}<path d="M ${-hs} 0 Q 0 0 0 ${-hs}" fill="none" stroke="${TRACK}" stroke-width="${W}" stroke-linecap="round"/>`;
   }
+  // Weite Kurve: sanfter Bogen von der West-Kante zur NE-Ecke
+  if (t === 'wide_curve') {
+    return `${hit}<path d="M ${-hs} 0 Q ${hs} 0 ${hs} ${-hs}" fill="none" stroke="${TRACK}" stroke-width="${W}" stroke-linecap="round"/>`;
+  }
+  // Brücke: Gleis mit grünen Trägern (Seitenschienen + Kreuze)
+  if (t === 'bridge') {
+    return `${hit}
+      <line x1="${-L}" y1="-7" x2="${L}" y2="-7" stroke="#2f9e6a" stroke-width="2"/>
+      <line x1="${-L}" y1="7"  x2="${L}" y2="7"  stroke="#2f9e6a" stroke-width="2"/>
+      <path d="M ${-hs} -7 L ${-hs/2} 7 M ${-hs/2} -7 L 0 7 M 0 -7 L ${hs/2} 7 M ${hs/2} -7 L ${hs} 7" stroke="#2f9e6a" stroke-width="1.5" fill="none" opacity="0.8"/>
+      <line x1="${-L}" y1="0" x2="${L}" y2="0" stroke="${TRACK}" stroke-width="${W}" stroke-linecap="round"/>`;
+  }
+  // Bahnübergang: Gleis kreuzt eine Straße (grauer Querbalken + rote Marken)
+  if (t === 'level_crossing') {
+    return `${hit}
+      <rect x="-7" y="${-hs}" width="14" height="${GRID}" fill="#3a3852" fill-opacity="0.7"/>
+      <line x1="${-L}" y1="0" x2="${L}" y2="0" stroke="${TRACK}" stroke-width="${W}" stroke-linecap="round"/>
+      <path d="M -5 ${-hs+3} l 4 4 M -1 ${-hs+3} l -4 4" stroke="#ef4444" stroke-width="1.5"/>
+      <path d="M 5 ${hs-3} l -4 -4 M 1 ${hs-3} l 4 -4" stroke="#ef4444" stroke-width="1.5"/>`;
+  }
   // Kreuzung (nicht schaltbar): zwei sich kreuzende Geraden
   if (t === 'cross') {
     return `${hit}
       <line x1="0" y1="${-L}" x2="0" y2="${L}" stroke="${TRACK}" stroke-width="${W}" stroke-linecap="round"/>
       <line x1="${-L}" y1="0" x2="${L}" y2="0" stroke="${TRACK}" stroke-width="${W}" stroke-linecap="round"/>`;
   }
-  // Prellbock: Stummel + Endbalken
-  if (t === 'bumper') {
+  // Prellbock / Gleisende: Stummel + Endbalken
+  if (t === 'bumper' || t === 'track_end') {
     return `${hit}
       <line x1="0" y1="${L}" x2="0" y2="-3" stroke="${TRACK}" stroke-width="${W}" stroke-linecap="round"/>
       <line x1="-6" y1="-3" x2="6" y2="-3" stroke="#ef6a6a" stroke-width="3" stroke-linecap="round"/>`;
   }
+  // Y-Weiche / Dreiwegweiche: symmetrische Abzweige
+  if (t === 'y_turnout' || t === 'three_way') {
+    const thrown = turnoutStates[el.ref_address] || false;
+    const c1 = thrown ? AMBER : TRACK;
+    const stem   = `<line x1="0" y1="${L}" x2="0" y2="0" stroke="${TRACK}" stroke-width="${W}" stroke-linecap="round"/>`;
+    const left   = `<line x1="0" y1="0" x2="${-hs}" y2="${-hs}" stroke="${TRACK}" stroke-width="${W}" stroke-linecap="round"/>`;
+    const right  = `<line x1="0" y1="0" x2="${hs}" y2="${-hs}" stroke="${c1}" stroke-width="${W}" stroke-linecap="round"/>`;
+    const mid    = t === 'three_way' ? `<line x1="0" y1="0" x2="0" y2="${-L}" stroke="${TRACK}" stroke-width="${W}" stroke-linecap="round"/>` : '';
+    const badge = el.ref_address
+      ? `<text x="${hs-1}" y="${hs-2}" text-anchor="end" font-size="8" font-weight="700" fill="#e8b64d" paint-order="stroke" stroke="#12101c" stroke-width="2.5">${el.ref_address}</text>` : '';
+    return `${hit}${stem}${mid}${left}${right}${badge}`;
+  }
   // Weichen-Familie: durchgehende Route senkrecht (bei rotation 0), Abzweig je Typ.
   // Die aktuell gestellte Route wird hervorgehoben (gerade = Gleisfarbe, abbiegen = orange).
-  if (t === 'turnout' || t === 'turnout_r' || t === 'turnout_l' || t === 'slip') {
+  if (t === 'turnout' || t === 'turnout_r' || t === 'turnout_l' || t === 'slip' || t === 'dkw') {
     const thrown = turnoutStates[el.ref_address] || false;
     const throughColor = thrown ? TRACK_DIM : TRACK;      // gerade
     const branchColor  = thrown ? AMBER     : TRACK_DIM;  // abbiegen
     const through = `<line x1="0" y1="${-L}" x2="0" y2="${L}" stroke="${throughColor}" stroke-width="${W}" stroke-linecap="round"/>`;
     let branch;
-    if (t === 'turnout_l')  branch = `<line x1="0" y1="1" x2="${-hs}" y2="${-hs}" stroke="${branchColor}" stroke-width="${W}" stroke-linecap="round"/>`;
-    else if (t === 'slip')  branch = `<line x1="${-dl}" y1="${-dl}" x2="${dl}" y2="${dl}" stroke="${branchColor}" stroke-width="${W}" stroke-linecap="round"/>`;
-    else                    branch = `<line x1="0" y1="1" x2="${hs}" y2="${-hs}" stroke="${branchColor}" stroke-width="${W}" stroke-linecap="round"/>`;
+    if (t === 'turnout_l')              branch = `<line x1="0" y1="1" x2="${-hs}" y2="${-hs}" stroke="${branchColor}" stroke-width="${W}" stroke-linecap="round"/>`;
+    else if (t === 'slip' || t === 'dkw') branch = `<line x1="${-dl}" y1="${-dl}" x2="${dl}" y2="${dl}" stroke="${branchColor}" stroke-width="${W}" stroke-linecap="round"/>`;
+    else                               branch = `<line x1="0" y1="1" x2="${hs}" y2="${-hs}" stroke="${branchColor}" stroke-width="${W}" stroke-linecap="round"/>`;
     const badge = el.ref_address
       ? `<text x="${hs-1}" y="${hs-2}" text-anchor="end" font-size="8" font-weight="700" fill="#e8b64d" paint-order="stroke" stroke="#12101c" stroke-width="2.5">${el.ref_address}</text>`
       : `<circle cx="${hs-4}" cy="${-hs+4}" r="2.5" fill="#ef4444"/>`;
@@ -437,17 +490,28 @@ function onCanvasRightClick(e) {
   rotateSelected();
 }
 
+const SWITCHABLE = ['turnout','turnout_r','turnout_l','y_turnout','three_way','slip','dkw'];
+
 async function placeElement(type, x, y) {
-  const label = type === 'label' ? (prompt('Beschriftung:', '') || 'Text') : '';
+  let label = '';
+  if (type === 'label') label = prompt('Beschriftung:', '') || 'Text';
+  else if (type === 'block') label = prompt('Block-Text:', 'Block') || 'Block';
+
   let ref_address = null;
-  if (type === 'turnout' || type === 'signal') {
-    const inp = prompt(`DCC-Adresse für ${type === 'turnout' ? 'Weiche' : 'Signal'} (1–2044):`, '1');
+  if (SWITCHABLE.includes(type) || type === 'signal') {
+    const what = type === 'signal' ? 'Signal' : 'Weiche';
+    const inp = prompt(`DCC-Adresse für ${what} (1–2044):`, '1');
+    ref_address = inp ? parseInt(inp) || null : null;
+  } else if (type === 'detector') {
+    const inp = prompt('Melder-Adresse:', '1');
     ref_address = inp ? parseInt(inp) || null : null;
   }
+
+  const properties = type === 'label' ? {font_size: 24} : {};
   const res = await fetch('/api/track/', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({element_type: type, x, y, rotation: 0, ref_address, label})
+    body: JSON.stringify({element_type: type, x, y, rotation: 0, ref_address, label, properties})
   });
   const el = await res.json();
   elements.push(el);
@@ -472,12 +536,14 @@ function showProps(id) {
     return;
   }
 
-  const typeLabels = {straight:'Gerades Gleis', curve:'Kurve', tunnel:'Tunnel',
-    tunnel_curve:'Tunnelkurve', turnout:'Weiche',
-    turnout_r:'Weiche (rechts)', turnout_l:'Weiche (links)', slip:'Kreuzungsweiche',
-    cross:'Kreuzung', bumper:'Prellbock', signal:'Signal', block:'Block',
+  const typeLabels = {straight:'Gerades Gleis', curve:'Kurve', wide_curve:'Kurve (weit)',
+    tunnel:'Tunnel', tunnel_curve:'Tunnelkurve', bridge:'Brücke', cross:'Kreuzung',
+    level_crossing:'Bahnübergang', bumper:'Prellbock', track_end:'Gleisende',
+    turnout:'Weiche', turnout_r:'Weiche (rechts)', turnout_l:'Weiche (links)',
+    y_turnout:'Y-Weiche', three_way:'Dreiwegweiche', slip:'Kreuzungsweiche',
+    dkw:'Doppelkreuzungsweiche', signal:'Signal', block:'Block',
     label:'Beschriftung', detector:'Belegtmelder'};
-  const isTurnout = ['turnout','turnout_r','turnout_l','slip'].includes(el.element_type);
+  const isTurnout = ['turnout','turnout_r','turnout_l','y_turnout','three_way','slip','dkw'].includes(el.element_type);
 
   panel.innerHTML = `
     <div class="prop-section">
@@ -601,12 +667,50 @@ async function controlTurnout(address, thrown) {
   });
 }
 
+const TYPE_NAMES = {
+  straight:'Gerade', curve:'Kurve', wide_curve:'Kurve weit', tunnel:'Tunnel',
+  tunnel_curve:'Tunnelkurve', bridge:'Brücke', cross:'Kreuzung',
+  level_crossing:'Bahnübergang', bumper:'Prellbock', track_end:'Gleisende',
+  turnout_r:'Weiche rechts', turnout_l:'Weiche links', y_turnout:'Y-Weiche',
+  three_way:'Dreiwegweiche', slip:'Kreuzungsweiche', dkw:'Doppelkreuzungsweiche',
+  signal:'Signal', detector:'Belegtmelder', block:'Block', label:'Beschriftung', pan:'Verschieben'
+};
+
 function selectTool(type, btn) {
   currentTool = type;
-  document.querySelectorAll('.tool-btn[data-type]').forEach(b => b.classList.remove('active'));
-  if (btn) btn.classList.add('active');
+  document.querySelectorAll('.tool-btn[data-type]').forEach(b => b.classList.toggle('active', b.dataset.type === type));
   wrapEl().classList.toggle('pan-mode', type === 'pan');
+  const lbl = document.getElementById('cur-tool-name');
+  if (lbl && TYPE_NAMES[type]) lbl.textContent = TYPE_NAMES[type];
 }
+
+// ── Katalog: alle Komponenten setzen ──────────
+
+const CATALOG = [
+  ['Gleise', ['straight','curve','wide_curve','tunnel','tunnel_curve','bridge','cross','level_crossing','track_end']],
+  ['Weichen', ['turnout_r','turnout_l','y_turnout','three_way','slip','dkw']],
+  ['Signale & Melder', ['signal','detector']],
+  ['Beschriftung', ['block','label']],
+];
+
+function buildCatalog() {
+  const body = document.getElementById('catalog-body');
+  body.innerHTML = CATALOG.map(([grp, items]) => `
+    <div class="cat-group-title">${grp}</div>
+    <div class="cat-grid">
+      ${items.map(type => {
+        const demo = {element_type: type, rotation: 0, ref_address: 1, label: TYPE_NAMES[type] || type, properties: {font_size: 20}};
+        return `<div class="cat-item" onclick="pickTool('${type}')">
+          <svg class="cat-preview" viewBox="-24 -24 48 48">${getElementSVG(demo)}</svg>
+          <span>${TYPE_NAMES[type] || type}</span>
+        </div>`;
+      }).join('')}
+    </div>`).join('');
+}
+
+function openCatalog()  { buildCatalog(); document.getElementById('catalog-modal').classList.remove('hidden'); }
+function closeCatalog() { document.getElementById('catalog-modal').classList.add('hidden'); }
+function pickTool(type) { selectTool(type, null); closeCatalog(); }
 
 // ── Tastatur ──────────────────────────────────
 

@@ -80,9 +80,10 @@ def _reconstruct(cell: dict, occ: set):
     if t == 45:           return "cross", a
     if t == 30:           return "bumper", a
     if t == 39:           return "tunnel", (a + 90) % 180   # breites Band = Tunnel
+    if t == 38:           return "tunnel", (a + 90) % 180   # Tunnelportal (gerade)
     if t in (10, 12, 23): return "signal", a
 
-    if t == 28:  # Kurve
+    if t == 28 or t == 37:  # Kurve (37 = Tunnelkurve)
         card_occ = [d for d in _DIRV if _occ(occ, x, y, d)]
         # reiner Diagonallauf ohne kardinalen Nachbar -> diagonale Gerade
         if not card_occ:
@@ -102,9 +103,9 @@ def _reconstruct(cell: dict, occ: set):
                 elif side in comp:          score += 0.5
             if score > best_score or (score == best_score and r == _CURVE_ANGLE.get(a, -1)):
                 best, best_score = r, score
-        return "curve", best
+        return ("tunnel_curve" if t == 37 else "curve"), best
 
-    # type 0, 39 und übrige Gleisstücke -> Gerade
+    # type 0, 31 und übrige Gleisstücke -> Gerade
     return "straight", (a + 90) % 180
 
 
@@ -194,17 +195,19 @@ def _parse(db_bytes: bytes) -> dict:
                 cells = [dict(r) for r in con.execute(
                     "SELECT x,y,angle,type,address1 FROM control_station_controls WHERE page_id=?", (pid,))]
                 occ = {(c["x"], c["y"]) for c in cells}
-                tunnel_pos = {(c["x"], c["y"]) for c in cells if c["type"] == 39}
+                tunnel_pos = {(c["x"], c["y"]) for c in cells if c["type"] in (39, 38, 37)}
                 if cells:
                     minx = min(c["x"] for c in cells); miny = min(c["y"] for c in cells)
                     for c in cells:
                         et, rot = _reconstruct(c, occ)
-                        # Kurven, die an einen Tunnel grenzen, ebenfalls als Tunnel zeichnen
+                        # Normale Kurve zur Tunnelkurve machen, wenn sie über einen
+                        # ihrer beiden Anschlüsse an einen Tunnel grenzt.
                         if et == "curve":
                             cx, cy = c["x"], c["y"]
-                            if any((cx + dx, cy + dy) in tunnel_pos
-                                   for dx in (-1, 0, 1) for dy in (-1, 0, 1) if (dx, dy) != (0, 0)):
-                                et = "tunnel_curve"
+                            for s in _SIDES.get(rot % 360, ()):
+                                dx, dy = _DIRV[s]
+                                if (cx + dx, cy + dy) in tunnel_pos:
+                                    et = "tunnel_curve"; break
                         track.append({
                             "element_type": et,
                             "x": (c["x"] - minx) * 40,
