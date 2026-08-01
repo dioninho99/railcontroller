@@ -177,6 +177,7 @@ let currentTool = 'straight';
 let selectedId  = null;
 let elements    = [];
 let turnoutStates = {};
+let turnoutNames = {};
 
 let view = { ...DEFAULT_VIEW };
 
@@ -270,7 +271,7 @@ function updateHint() {
 async function loadTrack() {
   elements = await fetch('/api/track/').then(r => r.json());
   const turnouts = await fetch('/api/turnouts/').then(r => r.json());
-  turnouts.forEach(t => { turnoutStates[t.address] = t.thrown; });
+  turnouts.forEach(t => { turnoutStates[t.address] = t.thrown; turnoutNames[t.address] = t.name; });
   renderAll();
   updateHint();
   fitToContent();   // beim Öffnen automatisch auf den Plan einpassen
@@ -438,7 +439,11 @@ function getElementSVG(el) {
     const badge = el.ref_address
       ? `<text x="${hs-1}" y="${hs-2}" text-anchor="end" font-size="8" font-weight="700" fill="#e8b64d" paint-order="stroke" stroke="#12101c" stroke-width="2.5">${el.ref_address}</text>`
       : `<circle cx="${hs-4}" cy="${-hs+4}" r="2.5" fill="#ef4444"/>`;
-    return `${hit}${branch}${through}${badge}`;
+    const nm = el.ref_address ? (turnoutNames[el.ref_address] || '') : '';
+    const nameSvg = nm
+      ? `<text x="0" y="${hs+9}" text-anchor="middle" font-size="7.5" font-weight="600" fill="#c9bdf0" paint-order="stroke" stroke="#12101c" stroke-width="2.5">${String(nm).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</text>`
+      : '';
+    return `${hit}${branch}${through}${badge}${nameSvg}`;
   }
   // Belegtmelder: dezentes grünes Overlay auf dem Gleisabschnitt
   if (t === 'detector') {
@@ -624,7 +629,14 @@ function showProps(id) {
 
     ${isTurnout && el.ref_address ? `
     <div class="prop-section" style="border-top:1px solid var(--border)">
-      <div class="prop-label" style="margin-bottom:.6rem">Weiche ${el.ref_address} stellen</div>
+      <div class="prop-row">
+        <span class="prop-label">Beschriftung</span>
+        <div style="display:flex;gap:.4rem;align-items:center">
+          <input type="text" id="tname-${el.ref_address}" value="${(turnoutNames[el.ref_address]||'').replace(/"/g,'&quot;')}" placeholder="z.B. Einfahrt Gleis 1">
+          <button class="btn btn-sm btn-primary" onclick="saveTurnoutName(${el.ref_address}, ${el.id})">OK</button>
+        </div>
+      </div>
+      <div class="prop-label" style="margin:.4rem 0 .6rem">Weiche ${el.ref_address} stellen</div>
       <div style="display:flex;gap:.5rem">
         <button class="btn btn-success" style="flex:1" onclick="controlTurnout(${el.ref_address},false)">━ Gerade</button>
         <button class="btn btn-warning" style="flex:1" onclick="controlTurnout(${el.ref_address},true)">⑂ Abbiegen</button>
@@ -723,6 +735,20 @@ async function controlTurnout(address, thrown) {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({thrown})
   });
+}
+
+async function saveTurnoutName(address, id) {
+  if (!address) return;
+  const inp = document.getElementById(`tname-${address}`);
+  if (!inp) return;
+  const name = inp.value.trim();
+  await fetch(`/api/turnouts/${address}`, {
+    method: 'PUT', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({name})
+  });
+  turnoutNames[address] = name;
+  renderAll();
+  showProps(id);
 }
 
 const TYPE_NAMES = {

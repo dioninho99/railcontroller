@@ -19,6 +19,9 @@ class TurnoutCreate(BaseModel):
     address: int
     name: str
 
+class TurnoutUpdate(BaseModel):
+    name: str
+
 class TurnoutCommand(BaseModel):
     thrown: bool
 
@@ -48,6 +51,20 @@ def create_turnout(data: TurnoutCreate, session: Session = Depends(get_session))
     session.commit()
     session.refresh(t)
     return t
+
+
+@router.put("/{address}")
+def rename_turnout(address: int, data: TurnoutUpdate, session: Session = Depends(get_session)):
+    """Weiche umbenennen. Legt sie an, falls es sie (z.B. bei manuell gesetzten
+    Gleisplan-Weichen) noch nicht als Datensatz gibt."""
+    t = session.exec(select(Turnout).where(Turnout.address == address)).first()
+    if not t:
+        t = Turnout(address=address, name=data.name)
+    else:
+        t.name = data.name
+    session.add(t)
+    session.commit()
+    return {"ok": True, "address": address, "name": data.name}
 
 
 @router.delete("/{address}")

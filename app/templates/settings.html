@@ -120,10 +120,22 @@ async function loadSettings() {
   } else {
     div.innerHTML = turnouts.map(t => `
       <div class="turnout-manage">
-        <span><span class="t-name">${t.name}</span><span class="t-addr">Adr. ${t.address}</span></span>
-        <button class="btn btn-sm btn-danger" onclick="deleteTurnout(${t.address})">Entfernen</button>
+        <input type="text" id="tn-${t.address}" value="${(t.name||'').replace(/"/g,'&quot;')}" style="flex:1;min-width:0">
+        <span class="t-addr">Adr. ${t.address}</span>
+        <button class="btn btn-sm btn-primary" onclick="renameTurnout(${t.address})">Speichern</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteTurnout(${t.address})">✕</button>
       </div>`).join('');
   }
+}
+
+async function renameTurnout(address) {
+  const inp = document.getElementById(`tn-${address}`);
+  if (!inp) return;
+  await fetch(`/api/turnouts/${address}`, {
+    method: 'PUT', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name: inp.value.trim()})
+  });
+  loadSettings();
 }
 
 async function addTurnout() {
