@@ -362,18 +362,40 @@ function getElementSVG(el) {
       <path d="M -5 ${-hs+3} l 4 4 M -1 ${-hs+3} l -4 4" stroke="#ef4444" stroke-width="1.5"/>
       <path d="M 5 ${hs-3} l -4 -4 M 1 ${hs-3} l 4 -4" stroke="#ef4444" stroke-width="1.5"/>`;
   }
-  // Kreuzung: zeichnet die tatsächlichen Kreuzungsachsen (0=waag, 90=senk, 45=\, 135=/).
-  // Beim Import absolut gesetzt (rotation 0); manuell gesetzt Standard + und drehbar.
+  // Kreuzung: ein Gleis als Brücke oben (durchgezogen + Deck), das andere unten (mit Lücke).
+  // axes = Kreuzungsachsen (0=waag,90=senk,45=\,135=/); over = welche Achse oben liegt.
   if (t === 'cross') {
     const axes = (el.properties && el.properties.axes) || [0, 90];
-    const seg = o => {
-      if (o === 0)   return `<line x1="${-hs}" y1="0" x2="${hs}" y2="0" stroke="${TRACK}" stroke-width="${W}" stroke-linecap="round"/>`;
-      if (o === 90)  return `<line x1="0" y1="${-hs}" x2="0" y2="${hs}" stroke="${TRACK}" stroke-width="${W}" stroke-linecap="round"/>`;
-      if (o === 45)  return `<line x1="${-hs}" y1="${-hs}" x2="${hs}" y2="${hs}" stroke="${TRACK}" stroke-width="${W}" stroke-linecap="round"/>`;
-      if (o === 135) return `<line x1="${hs}" y1="${-hs}" x2="${-hs}" y2="${hs}" stroke="${TRACK}" stroke-width="${W}" stroke-linecap="round"/>`;
-      return '';
-    };
-    return `${hit}${axes.map(seg).join('')}`;
+    const endpts = o => o === 0   ? [[-hs, 0], [hs, 0]]
+                      : o === 90  ? [[0, -hs], [0, hs]]
+                      : o === 45  ? [[-hs, -hs], [hs, hs]]
+                      :             [[hs, -hs], [-hs, hs]];
+    if (axes.length < 2) {
+      const [a, b] = endpts(axes[0] ?? 0);
+      return `${hit}<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" stroke="${TRACK}" stroke-width="${W}" stroke-linecap="round"/>`;
+    }
+    let over = (el.properties && el.properties.over != null) ? el.properties.over
+             : (axes.find(o => o === 45 || o === 135));
+    if (over == null) over = axes[1];
+    const under = axes.find(o => o !== over);
+
+    const [[ux1, uy1], [ux2, uy2]] = endpts(under);
+    const uL = Math.hypot(ux2 - ux1, uy2 - uy1), udx = (ux2 - ux1) / uL, udy = (uy2 - uy1) / uL;
+    const g = 7;  // Lücke am Kreuzungspunkt (Unterführung)
+    const underSvg =
+      `<line x1="${ux1}" y1="${uy1}" x2="${(-udx*g).toFixed(1)}" y2="${(-udy*g).toFixed(1)}" stroke="${TRACK}" stroke-width="${W}" stroke-linecap="round"/>
+       <line x1="${(udx*g).toFixed(1)}" y1="${(udy*g).toFixed(1)}" x2="${ux2}" y2="${uy2}" stroke="${TRACK}" stroke-width="${W}" stroke-linecap="round"/>`;
+
+    const [[ox1, oy1], [ox2, oy2]] = endpts(over);
+    const oL = Math.hypot(ox2 - ox1, oy2 - oy1), odx = (ox2 - ox1) / oL, ody = (oy2 - oy1) / oL;
+    const px = -ody, py = odx, h = g + 3, off = 5;
+    const rail = s =>
+      `<line x1="${(odx*-h + px*s*off).toFixed(1)}" y1="${(ody*-h + py*s*off).toFixed(1)}" x2="${(odx*h + px*s*off).toFixed(1)}" y2="${(ody*h + py*s*off).toFixed(1)}" stroke="${TRACK}" stroke-opacity="0.5" stroke-width="1.5" stroke-linecap="round"/>`;
+    const overSvg =
+      rail(1) + rail(-1) +
+      `<line x1="${ox1}" y1="${oy1}" x2="${ox2}" y2="${oy2}" stroke="${TRACK}" stroke-width="${W}" stroke-linecap="round"/>`;
+
+    return `${hit}${underSvg}${overSvg}`;
   }
   // Prellbock / Gleisende: Stummel + Endbalken
   if (t === 'bumper' || t === 'track_end') {
@@ -602,7 +624,27 @@ function showProps(id) {
         Status: <strong>${turnoutStates[el.ref_address] ? 'Abbiegen' : 'Gerade'}</strong>
       </div>
     </div>` : ''}
+
+    ${el.element_type === 'cross' && (el.properties?.axes?.length === 2) ? `
+    <div class="prop-section" style="border-top:1px solid var(--border)">
+      <div class="prop-label" style="margin-bottom:.6rem">Überwerfung</div>
+      <button class="btn btn-sm btn-ghost" style="width:100%" onclick="flipBridge(${el.id})">↕ Brücke tauschen (oben/unten)</button>
+    </div>` : ''}
   `;
+}
+
+async function flipBridge(id) {
+  const el = elements.find(e => e.id === id);
+  if (!el || !el.properties || !el.properties.axes || el.properties.axes.length !== 2) return;
+  const [a, b] = el.properties.axes;
+  const cur = (el.properties.over != null) ? el.properties.over
+            : (el.properties.axes.find(o => o === 45 || o === 135) ?? b);
+  el.properties.over = (cur === a) ? b : a;
+  await fetch(`/api/track/${id}`, {
+    method: 'PUT', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({properties: el.properties})
+  });
+  renderAll(); showProps(id);
 }
 
 async function setRotation(id, rotation) {
