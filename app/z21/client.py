@@ -15,6 +15,9 @@ from .protocol import (
     build_set_turnout, build_get_turnout_info,
     BROADCAST_DRIVING_SWITCHING, BROADCAST_SYSTEMSTATE_CHANGES,
 )
+from .occupancy import (
+    decode as decode_occupancy, rmbus_getdata_datagram, OCCUPANCY_FLAGS,
+)
 
 logger = logging.getLogger("railcontroller.z21")
 
@@ -48,9 +51,13 @@ class Z21Client:
 
         await self.send_raw(build_set_broadcast_flags(
             BROADCAST_DRIVING_SWITCHING | BROADCAST_SYSTEMSTATE_CHANGES
+            | OCCUPANCY_FLAGS   # R-Bus + CAN + LocoNet Belegtmelder abonnieren
         ))
         await self.send_raw(build_get_serial_number())
         await self.send_raw(build_systemstate_get())
+        # Ist-Zustand der R-Bus-Belegtmelder einmalig abfragen
+        await self.send_raw(rmbus_getdata_datagram(0))
+        await self.send_raw(rmbus_getdata_datagram(1))
 
         self._keepalive_task = asyncio.create_task(self._keepalive())
         self._watchdog_task  = asyncio.create_task(self._watchdog())
@@ -145,6 +152,19 @@ class Z21Client:
                     logger.error(f"Callback-Fehler: {e}")
         except Exception as e:
             logger.error(f"Parse-Fehler: {e} raw={data.hex()}")
+
+        # Belegtmeldung zusätzlich dekodieren (R-Bus / CAN / LocoNet)
+        try:
+            for address, occupied in decode_occupancy(data):
+                ev = {"type": "occupancy", "address": address, "occupied": occupied}
+                logger.debug(f"Z21 << occupancy {address}={'besetzt' if occupied else 'frei'}")
+                for cb in self._callbacks:
+                    try:
+                        cb(ev)
+                    except Exception as e:
+                        logger.error(f"Callback-Fehler: {e}")
+        except Exception as e:
+            logger.error(f"Occupancy-Parse-Fehler: {e} raw={data.hex()}")
 
     # ── Keepalive + Watchdog ────────────────────
 

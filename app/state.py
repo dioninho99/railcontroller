@@ -45,6 +45,7 @@ class AppState:
 
         self.locos:    dict[int, LocoState] = {}
         self.turnouts: dict[int, bool]      = {}
+        self.occupied: set[int]             = set()   # besetzte Belegtmelder-Adressen
 
         self._ws_clients: set = set()
         self._lock = asyncio.Lock()
@@ -135,6 +136,17 @@ class AppState:
                 "thrown": self.turnouts[addr],
             })
 
+        elif t == "occupancy":
+            addr = event["address"]
+            occ  = bool(event.get("occupied", False))
+            changed = (addr in self.occupied) != occ
+            if occ:
+                self.occupied.add(addr)
+            else:
+                self.occupied.discard(addr)
+            if changed:   # nur bei echter Änderung broadcasten (R-Bus sendet Voll-Snapshots)
+                await self.broadcast({"type": "occupancy", "address": addr, "occupied": occ})
+
     # ── Kommandierter State (überlebt Seitenwechsel) ──
 
     async def set_loco_drive(self, address: int, speed: int, forward: bool):
@@ -171,6 +183,7 @@ class AppState:
             **self._sys_dict(),
             "locos":    {str(k): v.to_dict() for k, v in self.locos.items()},
             "turnouts": {str(k): v for k, v in self.turnouts.items()},
+            "occupied": sorted(self.occupied),
         }
 
 
