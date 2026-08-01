@@ -342,9 +342,15 @@ function getElementSVG(el) {
   if (t === 'curve') {
     return `${hit}<path d="M ${-hs} 0 Q 0 0 0 ${-hs}" fill="none" stroke="${TRACK}" stroke-width="${W}" stroke-linecap="round"/>`;
   }
-  // Weite Kurve: sanfter Bogen von der West-Kante zur NE-Ecke
+  // Weite Kurve: sanfter Übergang von einer Kardinal-Kante in eine Diagonal-Ecke,
+  // damit sie bündig an die Diagonale anschließt.
   if (t === 'wide_curve') {
-    return `${hit}<path d="M ${-hs} 0 Q ${hs} 0 ${hs} ${-hs}" fill="none" stroke="${TRACK}" stroke-width="${W}" stroke-linecap="round"/>`;
+    const CARD = {N:[0,-hs], E:[hs,0], S:[0,hs], W:[-hs,0]};
+    const CORNER = {NE:[hs,-hs], SE:[hs,hs], SW:[-hs,hs], NW:[-hs,-hs]};
+    const p = el.properties || {};
+    const c = CARD[p.from] || [-hs,0];
+    const d = CORNER[p.to] || [hs,-hs];
+    return `${hit}<path d="M ${c[0]} ${c[1]} Q 0 0 ${d[0]} ${d[1]}" fill="none" stroke="${TRACK}" stroke-width="${W}" stroke-linecap="round"/>`;
   }
   // Brücke: Gleis mit grünen Trägern (Seitenschienen + Kreuze)
   if (t === 'bridge') {
@@ -388,12 +394,15 @@ function getElementSVG(el) {
 
     const [[ox1, oy1], [ox2, oy2]] = endpts(over);
     const oL = Math.hypot(ox2 - ox1, oy2 - oy1), odx = (ox2 - ox1) / oL, ody = (oy2 - oy1) / oL;
-    const px = -ody, py = odx, h = g + 3, off = 5;
+    const px = -ody, py = odx, h = g + 4, off = 6.5;
     const rail = s =>
-      `<line x1="${(odx*-h + px*s*off).toFixed(1)}" y1="${(ody*-h + py*s*off).toFixed(1)}" x2="${(odx*h + px*s*off).toFixed(1)}" y2="${(ody*h + py*s*off).toFixed(1)}" stroke="${TRACK}" stroke-opacity="0.5" stroke-width="1.5" stroke-linecap="round"/>`;
+      `<line x1="${(odx*-h + px*s*off).toFixed(1)}" y1="${(ody*-h + py*s*off).toFixed(1)}" x2="${(odx*h + px*s*off).toFixed(1)}" y2="${(ody*h + py*s*off).toFixed(1)}" stroke="#d9ccff" stroke-width="2.2" stroke-linecap="round"/>`;
+    // kleine Widerlager-Striche quer am Ende der Unterführungslücke
+    const abut = sgn =>
+      `<line x1="${(udx*g*sgn + (-udy)*4).toFixed(1)}" y1="${(udy*g*sgn + (udx)*4).toFixed(1)}" x2="${(udx*g*sgn - (-udy)*4).toFixed(1)}" y2="${(udy*g*sgn - (udx)*4).toFixed(1)}" stroke="${TRACK_DIM}" stroke-width="1.5" stroke-linecap="round"/>`;
     const overSvg =
-      rail(1) + rail(-1) +
-      `<line x1="${ox1}" y1="${oy1}" x2="${ox2}" y2="${oy2}" stroke="${TRACK}" stroke-width="${W}" stroke-linecap="round"/>`;
+      abut(1) + abut(-1) + rail(1) + rail(-1) +
+      `<line x1="${ox1}" y1="${oy1}" x2="${ox2}" y2="${oy2}" stroke="${TRACK}" stroke-width="${W + 1}" stroke-linecap="round"/>`;
 
     return `${hit}${underSvg}${overSvg}`;
   }
