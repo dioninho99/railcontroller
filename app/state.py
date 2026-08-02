@@ -177,6 +177,15 @@ class AppState:
             self.locos[address] = LocoState(address)
         return self.locos[address]
 
+    def set_loco_drive(self, address: int, speed: int, forward: bool):
+        loco = self.get_loco_state(address)
+        loco.speed = speed
+        loco.forward = forward
+
+    def set_loco_function_state(self, address: int, function: int, state: bool):
+        loco = self.get_loco_state(address)
+        loco.functions[function] = state
+
     def full_state(self) -> dict:
         return {
             "type": "full_state",
