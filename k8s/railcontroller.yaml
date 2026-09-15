@@ -59,8 +59,8 @@ spec:
   selector:
     app: railcontroller
   ports:
-    - port: 8000
-      targetPort: 8000
+    - port: 8001
+      targetPort: 8001
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -81,4 +81,4 @@ spec:
               service:
                 name: railcontroller
                 port:
-                  number: 8000
+                  number: 8001
