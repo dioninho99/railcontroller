@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: railcontroller
+  namespace: default
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: railcontroller
+  template:
+    metadata:
+      labels:
+        app: railcontroller
+    spec:
+      imagePullSecrets:
+        - name: ghcr
+      containers:
+        - name: railcontroller
+          image: ghcr.io/dioninho99/railcontroller:1.0
+          ports:
+            - containerPort: 8000
+          env:
+            - name: TZ
+              value: Europe/Zurich
+            - name: Z21_HOST
+              value: "192.168.0.111"
+            - name: Z21_PORT
+              value: "21105"
+            - name: Z21_MOCK
+              value: "false"
+            - name: DATABASE_URL
+              value: "sqlite:////data/railcontroller.db"
+            - name: LOG_LEVEL
+              value: "info"
+          volumeMounts:
+            - mountPath: /data
+              name: data
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: railcontroller-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: railcontroller
+  namespace: default
+spec:
+  type: ClusterIP
+  selector:
+    app: railcontroller
+  ports:
+    - port: 8000
+      targetPort: 8000
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: railcontroller
+  namespace: default
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: railcontroller.lienis.ch
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: railcontroller
+                port:
+                  number: 8000
